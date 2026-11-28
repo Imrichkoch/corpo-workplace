@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Linking, Modal,
   Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View,
@@ -6,6 +6,7 @@ import {
 import * as SecureStore from "expo-secure-store";
 import { StatusBar } from "expo-status-bar";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import AdminPanel from "./AdminPanel";
 
 const origin = "https://raizenko.cloud/corpo/app/";
 const key = "corpo.session";
@@ -28,7 +29,7 @@ const labels = { desk: "Stoly", room: "Zasadačky", parking: "Parkovanie" };
 const kindNames = { desk: "Pracovný stôl", room: "Zasadačka", parking: "Parkovacie miesto" };
 const roleNames = { owner: "Vlastník", admin: "Správca", member: "Člen" };
 const dateLabel = new Intl.DateTimeFormat("sk-SK", {day:"numeric",month:"long",timeZone:"UTC"});
-const tabs: [Tab,string][] = [["book","Priestory"],["mine","Rezervácie"],["plans","Pôdorysy"],["account","Účet"]];
+const tabs: [Tab|"admin",string][] = [["book","Priestory"],["mine","Rezervácie"],["plans","Pôdorysy"],["account","Účet"]];
 
 class RequestError extends Error {
   status: number;
@@ -143,7 +144,12 @@ function Workspace() {
   const [tab,setTab] = useState<Tab>("book"), [kind,setKind] = useState<Kind|"">(""), [office,setOffice] = useState(""), [plan,setPlan] = useState("");
   const [date,setDate] = useState(""), [book,setBook] = useState<Resource|null>(null), [busy,setBusy] = useState(false), [boot,setBoot] = useState(true);
   const [error,setError] = useState("");
+  const [showAdmin,setShowAdmin] = useState(false);
   const sequence = useRef(0);
+  const adminTicket = useCallback(async () => {
+    const result = await request<{ticket:string}>("auth/mobile-admin",token,{tenant});
+    return result.ticket;
+  },[tenant,token]);
   function storeIdentity(identity:Account, credential:string) {
     setAccount(identity); setToken(credential); setTenant(identity.tenants[0]?.id || "");
   }
@@ -156,7 +162,7 @@ function Workspace() {
     ++sequence.current;
     if (revoke) await request("auth/logout",token,{}).catch(()=>null);
     await SecureStore.deleteItemAsync(key);
-    setAccount(null); setToken(""); setWork(null); setTenant(""); setDate(""); setOffice(""); setPlan(""); setKind(""); setTab("book"); setBook(null); setBusy(false); setError("");
+    setAccount(null); setToken(""); setWork(null); setTenant(""); setDate(""); setOffice(""); setPlan(""); setKind(""); setTab("book"); setBook(null); setShowAdmin(false); setBusy(false); setError("");
   }
   useEffect(()=>{
     async function restore() {
@@ -200,6 +206,11 @@ function Workspace() {
   }
   if (boot) return <View style={styles.center}><ActivityIndicator color="#235743"/><Text style={styles.muted}>Načítavam účet…</Text></View>;
   if (!account) return <SignIn onLogin={onLogin}/>;
+  const active = account.tenants.find(item=>item.id===tenant);
+  const role = work?.tenant.role ?? active?.role;
+  const isAdmin = role==="owner" || role==="admin";
+  const mobileTabs: [Tab|"admin",string][] = isAdmin ? [...tabs.slice(0,-1),["admin","Správa"],tabs[tabs.length-1]] : tabs;
+  const closeAdmin = () => { setShowAdmin(false); void refresh(tenant,date); };
   const choices = account.tenants.map(t=>[t.id,t.name] as [string,string]);
   const places: [string,string][] = [["","Všetky kancelárie"],...(work?.offices.filter(o=>!o.archived).map(o=>[o.id,o.name] as [string,string]) || [])];
   const plans = work?.plans.filter(p=>(!office || p.office===office) && !work.offices.find(o=>o.id===p.office)?.archived) || [];
@@ -239,13 +250,16 @@ function Workspace() {
       <Card name={account.user.name} description={account.user.email}/>
       {!!choices.length && <Segments items={choices} value={tenant} select={switchTenant}/>}
       {work && <Text style={styles.muted}>{roleNames[work.tenant.role]}</Text>}
-      {work && work.tenant.role!=="member" && <Button label="Otvoriť webovú správu" outlined onPress={()=>openWeb("#inventory")}/>}
+      {isAdmin && <Button label="Správa firmy" outlined onPress={()=>setShowAdmin(true)}/>}
       {!choices.length && <Button label="Vytvoriť pracovisko" outlined onPress={()=>openWeb()}/>}
       <Button label="Odhlásiť sa" outlined onPress={()=>signOut().catch(error=>Alert.alert("Odhlásenie zlyhalo",describe(error)))}/>
     </ScrollView>}
-    <View style={styles.tabBar}>{tabs.map(([id,label])=>
-      <Pressable key={id} accessibilityRole="tab" accessibilityState={{selected:tab===id}} style={[styles.tabButton,tab===id && styles.active]}
-        onPress={()=>setTab(id)}><Text style={styles.tabLabel}>{label}</Text></Pressable>)}</View>
+    <View style={styles.tabBar}>{mobileTabs.map(([id,label])=>{
+      const selected = id==="admin" ? showAdmin : !showAdmin && tab===id;
+      return <Pressable key={id} accessibilityRole="tab" accessibilityState={{selected}} style={[styles.tabButton,selected && styles.active]}
+        onPress={()=>id==="admin" ? setShowAdmin(true) : setTab(id)}><Text style={styles.tabLabel}>{label}</Text></Pressable>;
+    })}</View>
+    {showAdmin && isAdmin && <AdminPanel base={origin} company={work?.tenant.name || active?.name || ""} ticket={adminTicket} close={closeAdmin}/>}
     {book && <Booking key={book.id} item={book} date={date} close={()=>setBook(null)}
       submit={async record=>{await change("reservation.create",record);setBook(null);setTab("mine");}}/>}
   </View>;

@@ -2,7 +2,7 @@ import logging
 import smtplib
 from http.cookies import CookieError, SimpleCookie
 
-from . import mail
+from . import mail, mobile_admin
 from .core import (
     DUMMY_HASH, SECRET, SESSION_AGE, Problem, digest, email, fail, first, identifier,
     matches, now, password, password_hash, rate, rows, text, token, transaction,
@@ -20,7 +20,8 @@ def list_tenants(db, user):
 
 def session(db, environ):
     authorization = environ.get("HTTP_AUTHORIZATION", "")
-    if authorization.startswith("Bearer "):
+    bearer = authorization.startswith("Bearer ")
+    if bearer:
         raw = authorization[7:]
     else:
         try:
@@ -30,8 +31,10 @@ def session(db, environ):
         raw = value.value if value else ""
     if not SECRET.fullmatch(raw):
         return None
-    return first(db, """SELECT u.id,u.name,u.email,s.hash FROM users u JOIN sessions s ON s.user=u.id
-                        WHERE s.hash=? AND s.expires>?""", digest(raw), now())
+    fingerprint, timestamp = digest(raw), now()
+    user = first(db, """SELECT u.id,u.name,u.email,s.hash FROM users u JOIN sessions s ON s.user=u.id
+                        WHERE s.hash=? AND s.expires>?""", fingerprint, timestamp)
+    return user or (None if bearer else mobile_admin.browser_user(db, fingerprint, timestamp))
 
 
 def profile(user):
@@ -39,7 +42,10 @@ def profile(user):
 
 
 def account(db, user):
-    return {"user": profile(user), "tenants": list_tenants(db, user["id"])}
+    tenants = list_tenants(db, user["id"])
+    if user.get("admin_tenant"):
+        tenants = [tenant for tenant in tenants if tenant["id"] == user["admin_tenant"]]
+    return {"user": profile(user), "tenants": tenants}
 
 
 def cookie(raw, base, age=SESSION_AGE):

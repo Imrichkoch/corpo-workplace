@@ -4,9 +4,10 @@ import { adminForm, adminView, officeOptions, showEditorPin, updatePinEditor } f
 const root = document.querySelector("#app");
 const dialog = document.querySelector("#dialog");
 const toast = document.querySelector("#toast");
+const mobileAdmin = new URLSearchParams(location.search).get("mobileAdmin") === "1";
 const tabs = [
   ["book","Rezervovať","reserve"],["calendar","Moje rezervácie","clock"],["map","Pôdorysy","map"],["visits","Návštevy","people"],
-  ["inventory","Kancelárie a priestory","office",true],["plans","Správa pôdorysov","map",true],
+  ["admin","Prehľad správy","gear",true],["inventory","Kancelárie a priestory","office",true],["plans","Správa pôdorysov","map",true],
   ["reservations","Správa rezervácií","reserve",true],["team","Ľudia a skupiny","people",true],["settings","Nastavenia firmy","gear",true],["mobile","Mobilná aplikácia","desk"],
 ];
 const local = {
@@ -17,7 +18,7 @@ const [initialView, initialPlan = ""] = location.hash.slice(1).split("/");
 const state = {
   account: null, data: null, tenant: "", office: "", kind: "", date: "", plan: initialView === "map" ? initialPlan : "", view: initialView || "book",
   mode: "login", link: null, token: "", entry: "", mobile: false, saving: false, loading: true,
-  loadError: "", request: 0,
+  loadError: "", request: 0, mobileAdmin,
 };
 let toastTimer;
 const isAdmin = () => state.data?.tenant.role !== "member" && Boolean(state.data?.tenant);
@@ -44,9 +45,13 @@ function tell(message, error = false) {
 async function api(route, payload) {
   const response = await fetch("./api/" + route, payload === undefined ? {cache:"no-store"} :
     {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)});
+  if (mobileAdmin && response.status === 401) reportMobileAdminClosed();
   const result = await response.json().catch(() => null);
   if (!response.ok || !result) throw Object.assign(new Error(result?.message || "Pracovisko je dočasne nedostupné."), {status: response.status});
   return result;
+}
+function reportMobileAdminClosed() {
+  window.ReactNativeWebView?.postMessage("corpo-admin-expired");
 }
 const endpoint = () => "tenant/" + encodeURIComponent(state.tenant);
 function labelToday() {
@@ -134,7 +139,7 @@ function navigation() {
   function links(admin) { return tabs.filter((tab) => Boolean(tab[3]) === admin && (!admin || isAdmin())).map(([id,label,glyph]) =>
     '<a href="#' + id + '"' + (state.view === id ? ' aria-current="page"' : '') + '>' + svg(glyph,19) + e(label) + '</a>').join(""); }
   if (!state.data) return "";
-  return '<nav aria-label="Hlavná navigácia"><div class="nav-label">Pracovisko</div>' + links(false) +
+  return '<nav aria-label="Hlavná navigácia">' + (mobileAdmin ? "" : '<div class="nav-label">Pracovisko</div>' + links(false)) +
     (isAdmin() ? '<div class="nav-label admin-label">Správa firmy</div>' + links(true) : "") + '</nav>';
 }
 function chrome() {
@@ -145,9 +150,10 @@ function chrome() {
     '<div class="profile"><span class="avatar" aria-hidden="true">' + e(initials) + '</span><div><strong>' + e(user.name) + '</strong><span>' +
     e(roles[state.data?.tenant.role] || user.email) + '</span></div>' + button("Odhlásiť","logout","logout","icon",'title="Odhlásiť sa"') + '</div></aside>' +
     '<div class="outer"><div class="top"><div>' + button("Navigácia","menu","menu","icon mobile-only",'aria-controls="sidebar" aria-expanded="' + state.mobile + '"') +
-    '<strong>Firemné pracovisko</strong></div><div class="top-right">' +
-    '<a class="text mobile-download" href="#mobile">' + svg("parking",16) + 'Mobilná aplikácia</a>' +
-    (state.account.tenants.length ? select("Firma","tenant",options(state.account.tenants,state.tenant),'data-filter="tenant"') : "") +
+    (mobileAdmin ? (state.view === "admin" ? "" : '<a class="text" href="#admin">Prehľad správy</a>') : '<strong>Firemné pracovisko</strong>') +
+    '</div><div class="top-right">' +
+    (mobileAdmin ? "" : '<a class="text mobile-download" href="#mobile">' + svg("parking",16) + 'Mobilná aplikácia</a>' +
+      (state.account.tenants.length ? select("Firma","tenant",options(state.account.tenants,state.tenant),'data-filter="tenant"') : "")) +
     '</div></div><main id="main" tabindex="-1" class="workspace">' + workspace() + '</main></div></div>';
 }
 function filterBar(includeOffice = true, future = false) {
@@ -241,7 +247,7 @@ function mobileView() {
     panel("Pridanie na plochu","Aplikácia sa otvorí samostatne a používa rovnaký účet.",
       '<div class="mobile-help"><p><strong>Android</strong> V Chrome otvorte ponuku a vyberte možnosť Nainštalovať aplikáciu alebo Pridať na plochu.</p>' +
       '<p><strong>iPhone</strong> V Safari vyberte Zdieľať a Pridať na plochu.</p></div>' +
-      '<div class="launch-links"><a class="btn primary" href="../downloads/corpo-workplace-1.0.0-android.apk" download>Stiahnuť Android APK</a><a class="btn secondary" href="corpo-workplace://signin">Otvoriť nainštalovanú aplikáciu</a></div>');
+      '<div class="launch-links"><a class="btn primary" href="../downloads/corpo-workplace-android.apk" download>Stiahnuť Android APK</a><a class="btn secondary" href="corpo-workplace://signin">Otvoriť nainštalovanú aplikáciu</a></div>');
 }
 function workspace() {
   if (state.loading && !state.data) return '<p class="initial">Načítavam pracovisko…</p>';
@@ -256,7 +262,9 @@ function workspace() {
 }
 function render() {
   root.innerHTML = state.account ? chrome() : state.loading ?
-    '<main id="main" class="initial">Načítavam pracovisko…</main>' : guest();
+    '<main id="main" class="initial">Načítavam pracovisko…</main>' : mobileAdmin
+    ? '<main id="main" class="workspace">' + empty("gear","Otvorte správu znova","Pokračujte zo svojho účtu v mobilnej aplikácii.") + '</main>'
+    : guest();
 }
 function navigate() {
   const [target, plan] = location.hash.slice(1).split("/");
@@ -432,7 +440,7 @@ document.addEventListener("click",event => {
     case "kind": state.kind = kind; render(); root.querySelector('.segments [aria-pressed="true"]')?.focus(); break;
     case "menu": state.mobile = !state.mobile; render(); root.querySelector(state.mobile ? '#sidebar nav a' : '.mobile-only')?.focus(); break;
     case "logout":
-      api("auth/logout",{}).then(() => { ++state.request; state.account = null; state.data = null; state.tenant = ""; state.mode = "login"; state.date = ""; state.office = ""; state.kind = ""; state.plan = ""; state.mobile = false; history.replaceState(null,"","./"); render(); }).catch(error => tell(error.message,true));
+      api("auth/logout",{}).then(() => { ++state.request; state.account = null; state.data = null; state.tenant = ""; state.mode = "login"; state.date = ""; state.office = ""; state.kind = ""; state.plan = ""; state.mobile = false; history.replaceState(null,"",mobileAdmin ? "?mobileAdmin=1#admin" : "./"); render(); if (mobileAdmin) reportMobileAdminClosed(); }).catch(error => tell(error.message,true));
       break;
   }
 });

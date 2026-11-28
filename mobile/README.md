@@ -1,6 +1,6 @@
 # Corpo Workplace pre Android a iOS
 
-Expo aplikácia používa rovnaký účet a API ako [webové pracovisko](https://raizenko.cloud/corpo/app/). V mobile si môžete vybrať firmu, rezervovať stôl, zasadačku alebo parkovacie miesto, otvoriť pôdorys a zrušiť vlastnú rezerváciu. Správa členov, skupín, kancelárií a pôdorysov sa otvára v responzívnom webovom rozhraní.
+Expo aplikácia používa rovnaký účet a API ako [webové pracovisko](https://raizenko.cloud/corpo/app/). V mobile si môžete vybrať firmu, rezervovať stôl, zasadačku alebo parkovacie miesto, otvoriť pôdorys a zrušiť vlastnú rezerváciu. Vlastníci a správcovia otvoria členov, skupiny, kancelárie, pôdorysy a rezervácie priamo cez kartu **Správa**. Aplikácia používa súčasné prihlásenie.
 
 ```powershell
 npm ci
@@ -12,7 +12,7 @@ Použite vývojovú zostavu kompatibilnú s Expo SDK 55. Prihlásenie do existuj
 
 ## Android
 
-[Stiahnuť podpísané Android APK](https://raizenko.cloud/corpo/downloads/corpo-workplace-1.0.0-android.apk). Súbor je dostupný priamo z VPS. Na aktualizácie tejto inštalácie použite rovnaký podpisový kľúč.
+[Stiahnuť podpísané Android APK](https://raizenko.cloud/corpo/downloads/corpo-workplace-android.apk). Súbor je dostupný priamo z VPS. Na aktualizácie tejto inštalácie použite rovnaký podpisový kľúč.
 
 Na lokálnu zostavu potrebujete Android SDK, JDK 17 alebo 21 a Gradle wrapper vygenerovaný aplikáciou.
 

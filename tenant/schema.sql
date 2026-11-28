@@ -55,6 +55,13 @@ CREATE TABLE IF NOT EXISTS sessions (
  hash TEXT PRIMARY KEY, user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, expires INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sessions_user ON sessions(user);
+CREATE TABLE IF NOT EXISTS mobile_admin_access (
+ hash TEXT PRIMARY KEY, parent TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE,
+ tenant TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+ kind TEXT NOT NULL CHECK(kind IN ('ticket','browser')), expires INTEGER NOT NULL,
+ UNIQUE(parent,kind)
+);
+CREATE INDEX IF NOT EXISTS mobile_admin_expiry ON mobile_admin_access(expires);
 CREATE TABLE IF NOT EXISTS links (
  id TEXT PRIMARY KEY, hash TEXT NOT NULL UNIQUE, kind TEXT NOT NULL CHECK(kind IN ('signup','invite','reset')),
  email TEXT NOT NULL, name TEXT NOT NULL DEFAULT '', company TEXT NOT NULL DEFAULT '',

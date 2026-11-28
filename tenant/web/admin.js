@@ -1,4 +1,4 @@
-import { button, chip, e, empty, form, header, input, kinds, linkAttrs, list, option, options, panel, planImage, roles, row, select } from "./ui.js";
+import { button, chip, e, empty, form, header, input, kinds, linkAttrs, list, option, options, panel, planImage, roles, row, select, svg } from "./ui.js";
 
 const add = (label, type) => button(label, "open", "plus", "primary", 'data-type="' + type + '"');
 const edit = (id, type, label = "Upraviť") => button(label, "open", null, "secondary small", 'data-type="' + type + '" ' + linkAttrs(id));
@@ -16,7 +16,21 @@ function invitationStatus(item) {
   return ["Odoslaná", ""];
 }
 
-export function adminView(view, data, { office, kind }) {
+const adminSections = [
+  ["inventory","office","Kancelárie a priestory","Kancelárie, stoly, zasadačky a parkovacie miesta"],
+  ["reservations","reserve","Správa rezervácií","Rezervácie a obsadenosť pracoviska"],
+  ["plans","map","Správa pôdorysov","Nahrajte pôdorys alebo upravte označené miesta"],
+  ["team","people","Ľudia a skupiny","Členovia firmy, skupiny a e-mailové pozvánky"],
+  ["settings","gear","Nastavenia firmy","Názov a nastavenia pracoviska"],
+];
+
+export function adminView(view, data, { office, kind, mobileAdmin }) {
+  if (view === "admin") {
+    return header("Správa pracoviska",data.tenant.name) + '<div class="admin-shortcuts">' +
+      adminSections.map(([id,glyph,title,copy]) =>
+        '<a class="panel admin-shortcut" href="#' + id + '"><span class="tile ' + glyph + '">' + svg(glyph,20) +
+        '</span><span><strong>' + title + '</strong><small>' + copy + '</small></span></a>').join("") + '</div>';
+  }
   if (view === "inventory") {
     const activeOffices = data.offices.filter(o => !o.archived);
     const resources = data.resources.filter(r => ((!office || r.office === office) && (!kind || r.kind === kind)));
@@ -56,7 +70,7 @@ export function adminView(view, data, { office, kind }) {
         return row("invite", i.email, roles[i.role], allowed ? edit(i.id,"invite","Poslať znova") + change(i.id,"invite.revoke","Zrušiť") : "", chip(label,style));
       }), "Zatiaľ neboli odoslané pozvánky."));
   }
-  return header("Nastavenia firmy", "Spravujte názov tohto firemného pracoviska.", add("Vytvoriť ďalšiu firmu", "tenant")) +
+  return header("Nastavenia firmy", "Spravujte názov tohto firemného pracoviska.", mobileAdmin ? "" : add("Vytvoriť ďalšiu firmu", "tenant")) +
     panel(data.tenant.name, "Názov uvidia členovia aj pozvaní kolegov.", "", edit(data.tenant.id,"company"));
 }
 

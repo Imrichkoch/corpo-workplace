@@ -26,7 +26,7 @@ class TenantTest(unittest.TestCase):
                                "sender": "Corpo <office@example.com>", "proxy": False})
         self.day = (date.today() + timedelta(days=2)).isoformat()
 
-    def call(self, endpoint, data=None, bearer="", expected=200, *, origin=""):
+    def call(self, endpoint, data=None, bearer="", expected=200, *, origin="", cookie=""):
         body = json.dumps(data).encode() if data is not None else b""
         split, _, query = endpoint.partition("?")
         environ = {
@@ -38,6 +38,8 @@ class TenantTest(unittest.TestCase):
             environ["HTTP_AUTHORIZATION"] = "Bearer " + bearer
         if origin:
             environ["HTTP_ORIGIN"] = origin
+        if cookie:
+            environ["HTTP_COOKIE"] = cookie
         result = {}
         def respond(status, headers):
             result.update(status=int(status.split()[0]), headers=dict(headers))
@@ -132,3 +134,53 @@ class TenantTest(unittest.TestCase):
         secret = self.outbox_link("member@example.com")
         self.permissions(owner,tenant,"invite.revoke",{"id":result["id"]})
         self.call("auth/accept",{"token":secret,"password":PASSWORD,"name":"Kolega"},expected=404)
+
+    def exchange_admin(self, ticket, expected=303, cross_site=False):
+        body = ("ticket=" + ticket).encode()
+        environ = {
+            "PATH_INFO": "/corpo/app/mobile-admin/session", "REQUEST_METHOD": "POST",
+            "CONTENT_TYPE": "application/x-www-form-urlencoded",
+            "CONTENT_LENGTH": str(len(body)), "wsgi.input": io.BytesIO(body),
+            "HTTP_SEC_FETCH_SITE": "cross-site" if cross_site else "none",
+        }
+        result = {}
+        def respond(status, headers):
+            result.update(status=int(status.split()[0]), headers=dict(headers))
+        raw = b"".join(self.app(environ, respond))
+        self.assertEqual(result["status"], expected, raw)
+        if expected == 303:
+            self.assertEqual(result["headers"]["Location"], "/corpo/app/?mobileAdmin=1#admin")
+            cookie = result["headers"]["Set-Cookie"]
+            self.assertIn("HttpOnly", cookie)
+            self.assertIn("Secure", cookie)
+            self.assertNotIn(ticket, cookie)
+            return cookie.split(";")[0]
+        return None
+
+    def test_mobile_admin_ticket_is_scoped_single_use_and_linked_to_native_session(self):
+        owner, tenant = self.signup("native-owner@example.com", "Prvá firma")
+        other = self.call("account/tenants", {"company":"Druhá firma"}, owner, 201)["id"]
+        member = self.enroll(owner,tenant,"native-member@example.com")
+        self.call("auth/mobile-admin",{"tenant":tenant},member,403)
+        self.call("auth/mobile-admin",{"tenant":tenant},expected=401)
+
+        def new_ticket():
+            return self.call("auth/mobile-admin",{"tenant":tenant},owner)["ticket"]
+
+        ticket = new_ticket()
+        self.exchange_admin(ticket,403,cross_site=True)
+        cookie = self.exchange_admin(ticket)
+        self.exchange_admin(ticket,401)
+        self.call("account",bearer=cookie.split("=")[1],expected=401)
+        self.assertEqual([item["id"] for item in self.call("account",cookie=cookie)["tenants"]],[tenant])
+        self.call("tenant/"+other,expected=404,cookie=cookie)
+        self.call("account/tenants",{"company":"Mimo firmy"},expected=403,cookie=cookie)
+        self.call("auth/mobile-admin",{"tenant":tenant},expected=401,cookie=cookie)
+        self.call("tenant/"+tenant,{"action":"office.save","record":{"name":"Kancelária z mobilu"}},cookie=cookie)
+
+        self.call("auth/logout",{},cookie=cookie)
+        self.call("account",expected=401,cookie=cookie)
+        self.call("account",bearer=owner)
+        cookie = self.exchange_admin(new_ticket())
+        self.call("auth/logout",{},owner)
+        self.call("account",expected=401,cookie=cookie)

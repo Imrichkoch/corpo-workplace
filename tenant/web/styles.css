@@ -106,3 +106,9 @@ fieldset{min-width:0;border:1px solid var(--border);border-radius:8px;padding:9p
 .slot-status{background:#f2f6ef;border-radius:7px;padding:8px;color:#405c4d;font-size:13px;line-height:1.4}
 .panel .pinboard:focus-within{outline:1px solid #95aa9c}
 @media(max-width:650px){.plan-choices{grid-template-columns:repeat(2,minmax(0,1fr))}.plan-choice{padding:7px;min-height:58px}.plan-choice strong{font-size:14px}.plan-choice .tile{width:29px;height:29px}.pin{width:27px;height:27px}}
+
+.admin-shortcuts{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));gap:10px}
+.admin-shortcut{display:flex;align-items:flex-start;gap:10px;min-height:78px;margin:0;padding:14px}
+.admin-shortcut:hover{background:#f3f8ef;border-color:#c9ddc9}
+.admin-shortcut strong{display:block;font-size:16px;color:var(--ink)}
+.admin-shortcut small{display:block;color:var(--muted);line-height:1.4;font-size:13px;margin-top:4px}

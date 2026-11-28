@@ -8,7 +8,7 @@ from http import HTTPStatus
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from . import auth, mail, workplace
+from . import auth, mail, mobile_admin, workplace
 from .core import IDENTIFIER, ROOT, Problem, connect, day, fail, first, initialise, object_body, rate, text, today, transaction
 
 STATIC = ROOT / "web"
@@ -61,12 +61,20 @@ def api(db, endpoint, method, environ, config):
         return reply(200, result, additional)
     user = identify(db, environ)
     uid = user["id"]
+    admin_tenant = user.get("admin_tenant")
+    if method == "POST" and endpoint == "auth/mobile-admin":
+        if admin_tenant or not environ.get("HTTP_AUTHORIZATION", "").startswith("Bearer "):
+            fail("Otvorte správu z mobilnej aplikácie.", 401)
+        return reply(200, mobile_admin.issue_ticket(db, user, data))
     if method == "POST" and endpoint == "auth/logout":
-        db.execute("DELETE FROM sessions WHERE hash=?", (user["hash"],))
+        table = "mobile_admin_access" if admin_tenant else "sessions"
+        db.execute(f"DELETE FROM {table} WHERE hash=?", (user["hash"],))
         return reply(200, {}, [("Set-Cookie", auth.cookie("", config["base"], 0))])
     if method == "GET" and endpoint == "account":
         return reply(200, auth.account(db, user))
     if method == "POST" and endpoint == "account/tenants":
+        if admin_tenant:
+            fail("Toto prihlásenie je určené pre vybranú firmu.", 403)
         rate(db, f"tenant:create:{uid}", 8, 3600)
         with transaction(db):
             new = auth.new_tenant(db, uid, text(data, "company"))
@@ -74,6 +82,8 @@ def api(db, endpoint, method, environ, config):
     parts = endpoint.split("/")
     if len(parts) >= 2 and parts[0] == "tenant" and IDENTIFIER.fullmatch(parts[1]):
         tid = parts[1]
+        if admin_tenant and tid != admin_tenant:
+            fail("Pracovisko sa nenašlo.", 404)
         if len(parts) == 2 and method == "GET":
             tenant = workplace.membership(db, tid, uid)
             query = parse_qs(environ.get("QUERY_STRING", ""), max_num_fields=12)
@@ -96,6 +106,28 @@ def api(db, endpoint, method, environ, config):
     fail("Stránka sa nenašla.", 404)
 
 
+def mobile_exchange(db, environ, config):
+    origin = environ.get("HTTP_ORIGIN")
+    base = urlsplit(config["base"])
+    expected = f"{base.scheme}://{base.netloc}"
+    if (origin and origin not in (expected, "null")) or environ.get("HTTP_SEC_FETCH_SITE") == "cross-site":
+        fail("Požiadavka pochádza z nepovolenej adresy.", 403)
+    try:
+        size = int(environ.get("CONTENT_LENGTH") or 0)
+        if not 0 < size <= 128:
+            fail("Odkaz je neplatný.", 400)
+        values = parse_qs(environ["wsgi.input"].read(size).decode("ascii"), strict_parsing=True, max_num_fields=1)
+    except (ValueError, UnicodeError):
+        fail("Odkaz je neplatný.", 400)
+    browser = mobile_admin.redeem(db, values.get("ticket",[None])[0])
+    location = PREFIX + "?mobileAdmin=1#admin"
+    return 303, b"", [
+        *headers("text/plain; charset=utf-8"),
+        ("Location", location),
+        ("Set-Cookie", auth.cookie(browser["token"], config["base"], browser["age"])),
+    ]
+
+
 def create_app(config=None):
     config = config or mail.settings()
     initialise(config["db"])
@@ -113,6 +145,9 @@ def create_app(config=None):
                 if target.startswith("api/") and method in ("GET", "POST"):
                     with closing(connect(config["db"])) as db:
                         status, body, response_headers = api(db, target[4:], method, environ, config)
+                elif target == "mobile-admin/session" and method == "POST":
+                    with closing(connect(config["db"])) as db:
+                        status, body, response_headers = mobile_exchange(db, environ, config)
                 elif target in STATIC_FILES and method in ("GET", "HEAD"):
                     file = STATIC / STATIC_FILES[target]
                     content_type = mimetypes.guess_type(file.name)[0] or "application/octet-stream"
