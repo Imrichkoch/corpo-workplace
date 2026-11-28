@@ -1,0 +1,29 @@
+[Unit]
+Description=Corpo Workplace tenant application
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+StateDirectory=corpo-workplace
+StateDirectoryMode=0700
+WorkingDirectory=/opt/corpo-workplace/current
+Environment=PYTHONPATH=/opt/corpo-workplace/current/deps
+Environment=PYTHONDONTWRITEBYTECODE=1
+EnvironmentFile=/etc/corpo-workplace.env
+ExecStart=/usr/bin/python3 -m tenant.server
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target

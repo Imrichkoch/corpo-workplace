@@ -1,0 +1,1 @@
+"""Corpo Workplace tenant application."""

@@ -1,0 +1,23 @@
+{
+  "name": "corpo-workplace-mobile",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "scripts": {
+    "start": "expo start",
+    "check": "tsc --noEmit",
+    "postinstall": "node scripts/android-toolchain.mjs"
+  },
+  "dependencies": {
+    "expo": "~55.0.32",
+    "expo-secure-store": "~55.0.18",
+    "expo-status-bar": "~55.0.6",
+    "react": "19.2.0",
+    "react-native": "0.83.10",
+    "react-native-safe-area-context": "~5.6.2"
+  },
+  "devDependencies": {
+    "@types/react": "~19.2.2",
+    "typescript": "~5.9.3"
+  }
+}

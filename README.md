@@ -7,6 +7,10 @@ Corpo je modulárna webová aplikácia na rezervovanie pracovných stolov a zasa
 - `app/api/workplace/route.ts` je serverové API. Databázová schéma je v `db/schema.ts` a migrácie v `drizzle/`.
 - `landing/` obsahuje prezentačnú stránku pre VPS. Pri nasadení do jej koreňa pridajte `favicon.svg`, `images/bratislava-office.jpg` a celý adresár `workspace/` z `public/`. Náhľad pracoviska už je v `landing/images/`.
 
+
+## Firemné účty
+
+Produkčné pracovisko je na [raizenko.cloud/corpo/app](https://raizenko.cloud/corpo/app/). Firemné účty, e-mailové pozvánky, skupiny, parkovanie a pôdorysy spracúva služba v adresári [tenant](tenant/README.md). Zdrojový kód pre Android a iOS je v adresári [mobile](mobile/README.md).
 ## Spustenie dema
 
 ```powershell

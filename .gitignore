@@ -43,3 +43,9 @@ yarn-error.log*
 
 # OS metadata
 .DS_Store
+
+# Tenant Python and local environment
+__pycache__/
+*.py[cod]
+/.venv/
+*.sqlite3
