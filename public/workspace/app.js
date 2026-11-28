@@ -1,3 +1,4 @@
+import { languageSwitcher, t } from "./i18n.js";
 import { icon, logo } from "./icons.js";
 import { avatar, button, emptyState, esc, iconButton } from "./components.js";
 import { asset, dayKey, offices, resources, shiftDay } from "./data.js";
@@ -20,7 +21,7 @@ const state = {
 if (!Array.isArray(state.hiddenModules)) state.hiddenModules = [];
 if (!offices.some((office) => office.id === state.office)) state.office = offices[0].id;
 
-root.innerHTML = '<div class="shell"><div class="mobile-overlay" data-action="menu"></div><aside id="sidebar" class="sidebar" aria-label="Hlavná navigácia"></aside><div class="workspace"><header class="topbar" id="topbar"></header><main class="content" id="main" tabindex="-1"></main></div></div><dialog id="dialog" aria-labelledby="dialog-title"></dialog><div class="toast" id="toast" role="status"></div>';
+root.innerHTML = t("<div class=\"shell\"><div class=\"mobile-overlay\" data-action=\"menu\"></div><aside id=\"sidebar\" class=\"sidebar\" aria-label=\"Hlavná navigácia\"></aside><div class=\"workspace\"><header class=\"topbar\" id=\"topbar\"></header><main class=\"content\" id=\"main\" tabindex=\"-1\"></main></div></div><dialog id=\"dialog\" aria-labelledby=\"dialog-title\"></dialog><div class=\"toast\" id=\"toast\" role=\"status\"></div>");
 const sidebar = root.querySelector("#sidebar");
 const topbar = root.querySelector("#topbar");
 const main = root.querySelector("#main");
@@ -49,22 +50,21 @@ function renderShell() {
   root.querySelector(".shell").classList.toggle("menu-open", state.menu);
   const profile = state.data?.profile;
   const groups = [...new Set(modules.map((module) => module.group))];
-  sidebar.innerHTML = '<a href="#overview" class="brand" data-route="overview" aria-label="Corpo — prehľad"><span class="brand-mark">' + logo + '</span><span>corpo<span class="brand-period">.</span><small>WORKPLACE</small></span></a><nav>' +
+  sidebar.innerHTML = t("<a href=\"#overview\" class=\"brand\" data-route=\"overview\" aria-label=\"Corpo — prehľad\"><span class=\"brand-mark\">") + logo + '</span><span>corpo<span class="brand-period">.</span><small>WORKPLACE</small></span></a><nav>' +
     groups.map(links).join("") + '</nav>' +
-    (profile ? '<div class="profile">' + avatar(profile.name, "mint") + '<span class="row-copy"><strong>' + esc(profile.name) + '</strong><span>' + (profile.demo ? "Ukážkové pracovisko" : "Firemné pracovisko") + '</span></span></div>' : '');
+    (profile ? '<div class="profile">' + avatar(profile.name, "mint") + '<span class="row-copy"><strong>' + esc(profile.name) + '</strong><span>' + (profile.demo ? t("Ukážkové pracovisko") : t("Firemné pracovisko")) + '</span></span></div>' : '');
   topbar.innerHTML = '<div class="breadcrumb">' +
-    iconButton("Zobraziť navigáciu", "menu", "menu", 'aria-controls="sidebar" aria-expanded="' + state.menu + '"') +
-    '<span class="breadcrumb-home">Pracovisko</span>' + icon("right", 14) + '<strong>' + esc(current().title) + '</strong></div><div class="top-controls">' +
-    '<label class="office-select"><span class="sr-only">Pracovisko</span>' + icon("building", 17) + '<select data-change="office" aria-label="Vybrať pracovisko">' + offices.map((item) => '<option value="' + item.id + '"' + (item.id === state.office ? " selected" : "") + '>' + esc(item.name) + '</option>').join("") + '</select>' + icon("down", 15) + '</label>' +
-    '</div>';
+    iconButton(t("Zobraziť navigáciu"), "menu", "menu", 'aria-controls="sidebar" aria-expanded="' + state.menu + '"') +
+    '<span class="breadcrumb-home">' + t("Pracovisko") + '</span>' + icon("right", 14) + '<strong>' + esc(current().title) + '</strong></div><div class="top-controls">' +
+    '<label class="office-select"><span class="sr-only">' + t("Pracovisko") + '</span>' + icon("building", 17) + t("<select data-change=\"office\" aria-label=\"Vybrať pracovisko\">") + offices.map((item) => '<option value="' + item.id + '"' + (item.id === state.office ? " selected" : "") + '>' + esc(item.name) + '</option>').join("") + '</select>' + icon("down", 15) + '</label>'  + languageSwitcher() + '</div>';
 }
 function renderMain() {
   if (state.loading) {
-    main.innerHTML = '<div class="loading" role="status">Načítavam pracovisko…</div>';
+    main.innerHTML = t("<div class=\"loading\" role=\"status\">Načítavam pracovisko…</div>");
     return;
   }
   if (!state.data) {
-    main.innerHTML = emptyState("building", "Pracovisko sa nepodarilo načítať", state.error, button("Skúsiť znova", "retry"));
+    main.innerHTML = emptyState("building", t("Pracovisko sa nepodarilo načítať"), state.error, button(t("Skúsiť znova"), "retry"));
     return;
   }
   main.innerHTML = current().render(context());
@@ -91,7 +91,7 @@ async function load() {
   state.loading = true;
   render();
   try { state.data = await storage.load(); }
-  catch (error) { state.error = error.message; }
+  catch (error) { state.error = t(error.message); }
   finally { state.loading = false; render(); }
 }
 
@@ -114,8 +114,8 @@ const action = {
     renderMain();
     main.querySelector('[data-action="visitor-filter"][aria-pressed="true"]')?.focus();
   },
-  "cancel-booking"(el) { confirmation(dialog, "Zrušiť rezerváciu?", "Priestor sa uvoľní pre ďalšiu rezerváciu.", "cancel-booking", el.dataset.id); },
-  "delete-visit"(el) { confirmation(dialog, "Odstrániť návštevu?", "Záznam odstránite z evidencie návštev.", "delete-visit", el.dataset.id); },
+  "cancel-booking"(el) { confirmation(dialog, t("Zrušiť rezerváciu?"), t("Priestor sa uvoľní pre ďalšiu rezerváciu."), "cancel-booking", el.dataset.id); },
+  "delete-visit"(el) { confirmation(dialog, t("Odstrániť návštevu?"), t("Záznam odstránite z evidencie návštev."), "delete-visit", el.dataset.id); },
   async "next-visit"(el) {
     if (saving) return;
     const visit = state.data.visits.find((v) => v.id === el.dataset.id);
@@ -124,7 +124,7 @@ const action = {
     try {
       state.data = await storage.update("next-visit", { id: visit.id, status: visit.status });
       render();
-      notify(visit.status === "expected" ? "Príchod zaznamenaný." : "Odchod zaznamenaný.");
+      notify(visit.status === "expected" ? t("Príchod zaznamenaný.") : t("Odchod zaznamenaný."));
     } catch (error) { notify(error.message); }
     finally { saving = false; el.disabled = false; }
   },
@@ -184,16 +184,16 @@ root.addEventListener("submit", async (event) => {
     actionName = "create-booking";
     record = { resource, date, start, end, title: title.trim() };
     error = checkBooking(record, today);
-    message = "Rezervácia potvrdená.";
+    message = t("Rezervácia potvrdená.");
   } else if (form.dataset.form === "visit") {
     actionName = "create-visit";
     record = { name: data.name.trim(), company: data.company.trim(), date: data.date, time: data.time, office: state.office };
     error = checkVisit(record, today);
-    message = "Návšteva pridaná.";
+    message = t("Návšteva pridaná.");
   } else {
     actionName = data.action;
     record = { id: data.id };
-    message = actionName === "cancel-booking" ? "Rezervácia zrušená." : "Návšteva odstránená.";
+    message = actionName === "cancel-booking" ? t("Rezervácia zrušená.") : t("Návšteva odstránená.");
   }
   if (error) { errorOutput.textContent = error; return; }
   saving = true;
@@ -206,7 +206,7 @@ root.addEventListener("submit", async (event) => {
     render();
     notify(message);
     main.focus({ preventScroll: true });
-  } catch (error) { errorOutput.textContent = error.message; }
+  } catch (error) { errorOutput.textContent = t(error.message); }
   finally { saving = false; submit.disabled = false; }
 });
 addEventListener("hashchange", () => route());

@@ -6,6 +6,8 @@ from email.utils import make_msgid
 from html import escape
 from pathlib import Path
 
+from .i18n import current, t
+
 
 def message_for(link, base, raw, sender):
     action = {
@@ -15,16 +17,17 @@ def message_for(link, base, raw, sender):
     }
     subject, heading = action[link["kind"]]
     company = link["company"]
-    opening = heading + (f" {company}." if company else ".")
+    opening = t(heading) + (f" {company}." if company else ".")
     msg = EmailMessage()
-    msg["Subject"] = subject
+    msg["Subject"] = t(subject)
     msg["From"] = sender
     msg["To"] = link["email"]
     msg["Message-ID"] = make_msgid()
-    url = f"{base}/#link={raw}"
-    note = "Odkaz je jednorazový a časovo obmedzený. Ak ste túto správu neočakávali, môžete ju ignorovať."
+    query = "?lang=en" if current.get() == "en" else ""
+    url = f"{base}/{query}#link={raw}"
+    note = t("Odkaz je jednorazový a časovo obmedzený. Ak ste túto správu neočakávali, môžete ju ignorovať.")
     msg.set_content(f"{opening}\n\n{url}\n\n{note}")
-    msg.add_alternative(f'<p>{escape(opening)}</p><p><a href="{escape(url, quote=True)}">Otvoriť Corpo Workplace</a></p><p>{escape(note)}</p>', subtype="html")
+    msg.add_alternative(f'<p>{escape(opening)}</p><p><a href="{escape(url, quote=True)}">{escape(t("Otvoriť Corpo Workplace"))}</a></p><p>{escape(note)}</p>', subtype="html")
     return msg
 
 

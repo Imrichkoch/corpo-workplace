@@ -1,5 +1,5 @@
-const shell = "corpo-shell-v4";
-const assets = ["./","./app.js","./ui.js","./admin.js","./styles.css","./icon-192.png","./icon-512.png","./favicon.svg"];
+const shell = "corpo-shell-v6";
+const assets = ["./","./app.js","./i18n.js","./security.js","./en.json","./ui.js","./admin.js","./styles.css","./icon-192.png","./icon-512.png","./favicon.svg"];
 self.addEventListener("install", (event) => event.waitUntil(caches.open(shell).then((cache) => cache.addAll(assets)).then(() => self.skipWaiting())));
 self.addEventListener("activate", (event) => event.waitUntil(caches.keys().then((keys) =>
   Promise.all(keys.filter((key) => key.startsWith("corpo-shell-") && key !== shell).map((key) => caches.delete(key)))

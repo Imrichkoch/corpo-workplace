@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import { icon } from "./icons.js";
 import { asset, formatDate, initials } from "./data.js";
 
@@ -20,12 +21,12 @@ export function avatar(name, color = "mint") {
   return '<span class="avatar ' + color + '" aria-hidden="true">' + esc(initials(name)) + '</span>';
 }
 export function bookingRows(items, today, { cancellable = false } = {}) {
-  if (!items.length) return emptyState("calendar", "Žiadne rezervácie", "Rezervujte si stôl alebo zasadačku.", button("Nová rezervácia", "new-booking", "plus"));
+  if (!items.length) return emptyState("calendar", t("Žiadne rezervácie"), t("Rezervujte si stôl alebo zasadačku."), button(t("Nová rezervácia"), "new-booking", "plus"));
   return '<ul class="booking-list">' + items.map((item) => {
     const r = asset(item.resource);
     if (!r) return "";
-    const day = item.date === today ? "Dnes" : formatDate(item.date, { day: "numeric", month: "short" });
-    const subtitle = [r.name, r.floor].join(" · ");
-    return '<li class="booking-row"><span class="tile ' + (r.type === "desk" ? "sky" : "mint") + '">' + icon(r.type === "desk" ? "desk" : "rooms", 19) + '</span><div class="row-copy"><strong>' + esc(item.title || (r.type === "desk" ? "Pracovný stôl" : "Zasadačka " + r.name)) + '</strong><span>' + esc(subtitle) + '</span></div><div class="booking-time"><strong>' + esc(day) + '</strong><span>' + esc(item.start + " – " + item.end) + '</span></div>' + (cancellable ? iconButton("Zrušiť rezerváciu", "cancel-booking", "close", 'data-id="' + esc(item.id) + '"') : "") + "</li>";
+    const day = item.date === today ? t("Dnes") : formatDate(item.date, { day: "numeric", month: "short" });
+    const subtitle = [r.name, t(r.floor)].join(" · ");
+    return '<li class="booking-row"><span class="tile ' + (r.type === "desk" ? "sky" : "mint") + '">' + icon(r.type === "desk" ? "desk" : "rooms", 19) + '</span><div class="row-copy"><strong>' + esc((item.id.startsWith("sample-") ? t(item.title) : item.title) || (r.type === "desk" ? t("Pracovný stôl") : t("Zasadačka ") + r.name)) + '</strong><span>' + esc(subtitle) + '</span></div><div class="booking-time"><strong>' + esc(day) + '</strong><span>' + esc(item.start + " – " + item.end) + '</span></div>' + (cancellable ? iconButton(t("Zrušiť rezerváciu"), "cancel-booking", "close", 'data-id="' + esc(item.id) + '"') : "") + "</li>";
   }).join("") + "</ul>";
 }

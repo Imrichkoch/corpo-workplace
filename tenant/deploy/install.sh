@@ -84,6 +84,23 @@ fi
 nginx -t
 systemctl reload nginx
 curl --fail --silent --show-error --max-time 6 https://raizenko.cloud/corpo/app/ >/dev/null
+site_root=$(dirname "$landing")
+for file in "$stage"/landing/{landing.css,landing.js}; do
+  if [[ -f "$file" ]]; then
+    target="$site_root/${file##*/}"
+    install -m 0644 "$file" "$target.next"
+    mv -Tf "$target.next" "$target"
+  fi
+done
+if [[ -d "$stage/workspace" ]]; then
+  install -d -m 0755 "$site_root/workspace/modules"
+  for file in "$stage"/workspace/{en.json,*.css,demo.html,modules/*.js,*.js}; do
+    relative=${file#"$stage/"}
+    target="$site_root/$relative"
+    install -m 0644 "$file" "$target.next"
+    mv -Tf "$target.next" "$target"
+  done
+fi
 install -m 0644 "$stage/landing/index.html" "$landing.next"
 mv -Tf "$landing.next" "$landing"
 printf 'Corpo Workplace active (%s).\n' "$version"

@@ -1,6 +1,7 @@
 import base64
 import io
 import json
+import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,14 @@ from email import policy
 from email.parser import BytesParser
 from pathlib import Path
 from re import search
+from unittest.mock import patch
+from urllib.parse import parse_qs, urlsplit
+from uuid import uuid4
 
+import pyotp
+from cryptography.fernet import Fernet
+
+from tenant import sso
 from tenant.server import create_app
 
 PASSWORD = "test-corpo-password"
@@ -184,3 +192,117 @@ class TenantTest(unittest.TestCase):
         cookie = self.exchange_admin(new_ticket())
         self.call("auth/logout",{},owner)
         self.call("account",expected=401,cookie=cookie)
+
+    def test_mfa_is_opt_in_and_protects_plans_admin_grants_and_new_sessions(self):
+        addr = "owner@example.com"
+        owner, tenant = self.signup(addr, "Firma")
+        workspace = "tenant/" + tenant
+        self.assertEqual(self.call(workspace, bearer=owner)["security"]["mfa"], False)
+        self.assertEqual(self.call(workspace, bearer=owner)["security"]["sso"], False)
+        self.assertEqual(self.call(workspace, bearer=owner)["security"]["directory"], False)
+        member = self.enroll(owner, tenant, "member@example.com")
+        office = self.permissions(owner,tenant,"office.save",{"name":"Kancelária"})["id"]
+        plan = self.permissions(owner,tenant,"plan.save",{"office":office,"name":"Pôdorys","kind":"office","image":PIXEL})["id"]
+        self.addCleanup(patch.stopall)
+        patch.dict(os.environ, {"CORPO_SECURITY_KEY": Fernet.generate_key().decode()}).start()
+        update = {"sso":False,"mfa":True,"directory":False,"password":PASSWORD}
+        self.call(workspace+"/security", update, member, expected=403)
+        self.call(workspace+"/security", {**update,"password":"wrong"}, owner, expected=422)
+        self.call(workspace+"/security", update, owner)
+        self.call(workspace, bearer=owner, expected=428)
+        self.call(workspace+"/plan/"+plan, bearer=member, expected=428)
+        self.call("auth/mobile-admin", {"tenant":tenant}, owner, expected=428)
+        self.call(workspace+"/mfa/email", {}, owner)
+        setup_mail = sorted(self.mail.glob("*.eml"), key=lambda p:p.stat().st_mtime_ns)[-1]
+        message = BytesParser(policy=policy.default).parsebytes(setup_mail.read_bytes())
+        email_code = search(r"[0-9]{8}", message.get_content())[0]
+        self.call(workspace+"/mfa/setup", {"code":"000"}, owner, expected=422)
+        enrollment = self.call(workspace+"/mfa/setup", {"code":email_code}, owner)
+        self.call(workspace+"/mfa/setup", {"code":email_code}, owner, expected=422)
+        code = pyotp.TOTP(enrollment["secret"]).now()
+        recovery = self.call(workspace+"/mfa/verify", {"code":code}, owner)["recoveryCodes"]
+        self.assertEqual(len(recovery), 8)
+        self.call(workspace+"/plan/"+plan, bearer=owner)
+        browser = self.exchange_admin(self.call("auth/mobile-admin", {"tenant":tenant}, owner)["ticket"])
+        self.call(workspace, cookie=browser)
+        new_session = self.call("auth/login", {"email":addr,"password":PASSWORD,"client":"native"})["token"]
+        self.call(workspace, bearer=new_session, expected=428)
+        self.call(workspace+"/mfa/verify", {"code":code}, new_session, expected=422)
+        self.call(workspace+"/mfa/verify", {"code":recovery[0]}, new_session)
+        self.call(workspace+"/mfa/verify", {"code":recovery[0]}, new_session, expected=422)
+        self.call(workspace+"/security", {**update,"mfa":False}, new_session)
+        member_id = self.call("account",bearer=member)["user"]["id"]
+        self.permissions(owner,tenant,"member.save",{"id":member_id,"role":"admin","teams":[]})
+        self.assertFalse(self.call(workspace+"/security", {**update,"mfa":False}, member)["mfa"])
+        self.call(workspace, bearer=member)
+
+    def test_entra_links_existing_accounts_and_issues_single_tenant_sessions(self):
+        addr = "owner@example.com"
+        owner, tenant = self.signup(addr, "Firma")
+        other = self.call("account/tenants", {"company":"Druhá firma"}, owner, expected=201)["id"]
+        workspace = "tenant/" + tenant
+        self.call("auth/entra/start", {"tenant":tenant}, expected=404)
+        self.addCleanup(patch.stopall)
+        patch.dict(os.environ, {"CORPO_SECURITY_KEY": Fernet.generate_key().decode()}).start()
+        directory, client, object_id = (str(uuid4()) for _ in range(3))
+        update = {"sso":True,"mfa":False,"directory":False,"password":PASSWORD,
+                  "entraTenant":directory,"clientId":client,"clientSecret":"mock-entra-client-secret"}
+        self.call(workspace+"/security", {**update,"sso":False,"directory":True}, owner, expected=400)
+        configuration = self.call(workspace+"/security", update, owner)
+        self.assertTrue(configuration["sso"] and configuration["hasSecret"])
+        self.assertNotIn("mock-entra-client-secret", json.dumps(configuration))
+
+        def begin(_, redirect_uri, state, prompt):
+            self.assertTrue(redirect_uri.endswith("/auth/entra/callback"))
+            self.assertEqual(prompt, "select_account")
+            return {"auth_uri":"https://login.microsoftonline.com/authorize?state="+state,"state":state}
+
+        mock = patch.object(sso, "msal_client").start().return_value
+        mock.initiate_auth_code_flow.side_effect = begin
+        mock.acquire_token_by_auth_code_flow.return_value = {
+            "access_token":"test-only",
+            "id_token_claims":{"iss":f"https://login.microsoftonline.com/{directory}/v2.0","tid":directory,"aud":client,"oid":object_id}
+        }
+        graph = patch.object(sso, "graph_identity").start()
+        graph.return_value = {"id":object_id,"onPremisesSyncEnabled":True}
+
+        def callback(flow, cookie="", expected=303):
+            state = parse_qs(urlsplit(flow["url"]).query)["state"][0]
+            output = {}
+            environ = {"PATH_INFO":"/corpo/app/auth/entra/callback","REQUEST_METHOD":"GET",
+                       "QUERY_STRING":"code=example&state="+state,"HTTP_COOKIE":cookie}
+            def start(status, headers):
+                output.update(status=int(status.split()[0]), headers=headers)
+            body = b"".join(self.app(environ,start)).decode()
+            self.assertEqual(output["status"],expected,body)
+            return any(value.startswith("corpo_session=") for key,value in output["headers"] if key=="Set-Cookie"), body
+
+        link_session = "corpo_session="+owner
+        link = self.call(workspace+"/entra", {"password":PASSWORD}, cookie=link_session)
+        state = parse_qs(urlsplit(link["url"]).query)["state"][0]
+        self.assertFalse(callback(link,link_session,expected=200)[0])
+        body = callback(link,link_session+"; corpo_entra="+state,expected=200)[1]
+        self.assertIn("Active Directory",body)
+        self.assertFalse(self.call(workspace,bearer=owner)["security"]["linked"])
+        self.call(workspace+"/security", {**update,"directory":True,"clientSecret":""}, owner)
+        link = self.call(workspace+"/entra", {"password":PASSWORD}, cookie=link_session)
+        state = parse_qs(urlsplit(link["url"]).query)["state"][0]
+        self.assertFalse(callback(link,link_session+"; corpo_entra="+state)[0])
+        self.assertTrue(self.call(workspace,bearer=owner)["security"]["linked"])
+        web = self.call("auth/entra/start", {"tenant":tenant})
+        state = parse_qs(urlsplit(web["url"]).query)["state"][0]
+        self.assertTrue(callback(web,"corpo_entra="+state)[0])
+        native = self.call("auth/entra/start", {"tenant":tenant,"client":"native"})
+        self.assertEqual(self.call("auth/entra/complete", {"poll":native["poll"]}),{"pending":True})
+        self.assertFalse(callback(native,expected=200)[0])
+        callback(native,expected=200)
+        app = self.call("auth/entra/complete", {"poll":native["poll"]})
+        credential = app["token"]
+        self.assertEqual([entry["id"] for entry in app["tenants"]],[tenant])
+        self.call(workspace,bearer=credential)
+        self.call("tenant/"+other,bearer=credential,expected=404)
+        self.call("auth/mobile-admin", {"tenant":other}, credential, expected=404)
+        self.call("account/tenants", {"company":"Mimo firmy"}, credential, expected=403)
+        self.call("auth/entra/complete", {"poll":native["poll"]}, expected=401)
+        self.call(workspace+"/security", {**update,"sso":False,"clientSecret":""}, owner)
+        self.call(workspace,bearer=credential,expected=401)

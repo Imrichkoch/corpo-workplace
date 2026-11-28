@@ -50,7 +50,7 @@ export function shiftDay(key, n) {
   return date.toISOString().slice(0, 10);
 }
 export function formatDate(key, options = { day: "numeric", month: "long" }) {
-  return new Intl.DateTimeFormat("sk-SK", { timeZone: "UTC", ...options }).format(dateFromKey(key));
+  return new Intl.DateTimeFormat(globalThis.document?.documentElement?.lang === "en" ? "en-GB" : "sk-SK", { timeZone: "UTC", ...options }).format(dateFromKey(key));
 }
 export const minutes = (value) => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
 export function officeTime() {

@@ -6,7 +6,8 @@ BROWSER_AGE = 3600
 
 def permission(db, parent_hash, tenant_id, timestamp):
     return first(db, """SELECT s.expires FROM sessions s JOIN members m ON m.user=s.user
-                        WHERE s.hash=? AND s.expires>? AND m.tenant=? AND m.role IN ('owner','admin')""",
+                        LEFT JOIN session_tenant x ON s.hash=x.session
+                        WHERE s.hash=? AND s.expires>? AND m.tenant=? AND (x.tenant IS NULL OR x.tenant=m.tenant) AND m.role IN ('owner','admin')""",
                  parent_hash, timestamp, tenant_id)
 
 
@@ -47,7 +48,7 @@ def redeem(db, raw):
 
 
 def browser_user(db, fingerprint, timestamp):
-    return first(db, """SELECT u.id,u.name,u.email,a.hash,a.tenant AS admin_tenant FROM mobile_admin_access a
+    return first(db, """SELECT u.id,u.name,u.email,a.hash,a.parent AS parent_session,a.tenant AS admin_tenant FROM mobile_admin_access a
                         JOIN sessions s ON s.hash=a.parent JOIN users u ON u.id=s.user
                         JOIN members m ON m.user=s.user AND m.tenant=a.tenant
                         WHERE a.hash=? AND a.kind='browser' AND a.expires>? AND s.expires>?

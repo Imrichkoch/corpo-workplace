@@ -1,3 +1,4 @@
+import { language, languageLocale, setLanguage, t, type Language } from "./i18n";
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import {
   ActivityIndicator, Alert, FlatList, Image, KeyboardAvoidingView, Linking, Modal,
@@ -23,25 +24,26 @@ type Reservation = { id: string; resourceName: string; kind: Kind; office: strin
 type Plan = { id: string; name: string; office: string; kind: "office" | "parking" };
 type Work = {
   tenant: Tenant; date: string; today: string; offices: { id: string; name: string; archived: number }[]; resources: Resource[];
+  security?: { sso: boolean };
   busy: { resource: string; start: string; end: string }[]; mine: Reservation[]; plans: Plan[];
 };
-const labels = { desk: "Stoly", room: "Zasadačky", parking: "Parkovanie" };
-const kindNames = { desk: "Pracovný stôl", room: "Zasadačka", parking: "Parkovacie miesto" };
-const roleNames = { owner: "Vlastník", admin: "Správca", member: "Člen" };
-const dateLabel = new Intl.DateTimeFormat("sk-SK", {day:"numeric",month:"long",timeZone:"UTC"});
-const tabs: [Tab|"admin",string][] = [["book","Priestory"],["mine","Rezervácie"],["plans","Pôdorysy"],["account","Účet"]];
+const labels = () => ({ desk: t("Stoly"), room: t("Zasadačky"), parking: t("Parkovanie") });
+const kindNames = () => ({ desk: t("Pracovný stôl"), room: t("Zasadačka"), parking: t("Parkovacie miesto") });
+const roleNames = () => ({ owner: t("Vlastník"), admin: t("Správca"), member: t("Člen") });
+const formatDate = (value:string) => new Intl.DateTimeFormat(languageLocale(), {day:"numeric",month:"long",timeZone:"UTC"}).format(new Date(value+"T12:00:00Z"));
+const translatedTabs = (): [Tab|"admin",string][] => [["book",t("Priestory")],["mine",t("Rezervácie")],["plans",t("Pôdorysy")],["account",t("Účet")]];
 
 class RequestError extends Error {
   status: number;
   constructor(message: string, status: number) { super(message); this.status = status; }
 }
 async function request<T>(path: string, token = "", record?: object): Promise<T> {
-  const headers: Record<string,string> = { Accept: "application/json" };
+  const headers: Record<string,string> = { Accept: "application/json", "Accept-Language":language() };
   if (token) headers.Authorization = "Bearer " + token;
   if (record) headers["Content-Type"] = "application/json";
   const result = await fetch(origin+"api/"+path,{headers,method:record ? "POST" : "GET",body:record ? JSON.stringify(record) : undefined});
   const data = await result.json().catch(() => null);
-  if (!result.ok || !data) throw new RequestError(data?.message || "Pracovisko je dočasne nedostupné.", result.status);
+  if (!result.ok || !data) throw new RequestError(data?.message || t("Pracovisko je dočasne nedostupné."), result.status);
   return data as T;
 }
 function shiftDay(value: string, count: number) {
@@ -49,9 +51,9 @@ function shiftDay(value: string, count: number) {
   date.setUTCDate(date.getUTCDate()+count);
   return date.toISOString().slice(0,10);
 }
-function describe(error: unknown) { return error instanceof Error ? error.message : "Nastala chyba."; }
+function describe(error: unknown) { return error instanceof Error ? error.message : t("Nastala chyba."); }
 function openWeb(fragment = "") {
-  Linking.openURL(origin + fragment).catch(() => Alert.alert("Adresu sa nepodarilo otvoriť."));
+  Linking.openURL(origin + "?lang=" + language() + fragment).catch(() => Alert.alert(t("Adresu sa nepodarilo otvoriť.")));
 }
 function Button({label,onPress,outlined = false,disabled = false}: {label:string;onPress:()=>void;outlined?:boolean;disabled?:boolean}) {
   return <Pressable accessibilityRole="button" disabled={disabled} onPress={onPress}
@@ -79,8 +81,75 @@ function Card({name,description,action}: {name:string;description:string;action?
   return <View style={styles.card}><Text style={styles.cardTitle}>{name}</Text><Text style={styles.muted}>{description}</Text>{action}</View>;
 }
 
+function MfaPrompt({id,credential,verified,leave}: {id:string;credential:string;verified:()=>void;leave:()=>void}) {
+  const [step,setStep] = useState<"loading"|"email"|"setup"|"verify"|"recovery">("loading");
+  const [code,setCode] = useState(""), [secret,setSecret] = useState(""), [codes,setCodes] = useState<string[]>([]);
+  const [pending,setPending] = useState(false), [error,setError] = useState("");
+  const base = "tenant/" + id + "/mfa";
+  async function run() {
+    if (step==="recovery") { verified(); return; }
+    setError(""); setPending(true);
+    try {
+      if (step==="loading") {
+        const result = await request<{enrolled:boolean;required:boolean}>(base,credential);
+        if (!result.required) { verified(); return; }
+        setStep(result.enrolled ? "verify" : "email");
+      } else if (step==="email") {
+        await request(base+"/email",credential,{});
+        setStep("setup");
+      } else if (step==="setup") {
+        const result = await request<{secret:string}>(base+"/setup",credential,{code});
+        setSecret(result.secret); setStep("verify");
+      } else {
+        const {recoveryCodes} = await request<{recoveryCodes:string[]}>(base+"/verify",credential,{code});
+        setSecret("");
+        if (recoveryCodes.length) { setCodes(recoveryCodes); setStep("recovery"); }
+        else verified();
+      }
+      setCode("");
+    } catch (error) { setError(describe(error)); }
+    finally { setPending(false); }
+  }
+  useEffect(()=>{ void run(); },[]);
+  const help = {
+    loading:t("Načítavam…"),
+    email:t("Pošlite si overovací kód na e-mail svojho účtu. Potom pridajte Corpo do overovacej aplikácie."),
+    setup:t("Zadajte kód, ktorý sme poslali na váš e-mail."),
+    verify:secret ? t("V overovacej aplikácii vytvorte časový účet s týmto kľúčom a zadajte šesťmiestny kód.") :
+      t("Zadajte šesťmiestny kód z overovacej aplikácie alebo obnovovací kód."),
+    recovery:t("Uložte si obnovovacie kódy na bezpečnom mieste. Každý môžete použiť raz."),
+  }[step];
+  return <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+    <Heading title={t("Viacfaktorové overenie (MFA)")} description={help}/>
+    {!!secret && <Text selectable style={styles.label} accessibilityLabel={t("Kľúč aplikácie")}>{secret}</Text>}
+    {codes.map(value=><Text key={value} selectable style={styles.label}>{value}</Text>)}
+    {(step==="setup" || step==="verify") && <Field label={t("Overovací kód")} value={code} set={setCode}/>}
+    {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
+    <Button label={step==="email" ? t("Poslať kód na e-mail") : step==="recovery" ? t("Pokračovať do pracoviska") :
+      step==="loading" ? t("Skúsiť znova") : t("Overiť kód")} disabled={pending || ((step==="setup" || step==="verify") && !code.trim())} onPress={run}/>
+    {(step==="setup" || !!secret) && <Button label={t("Začať znova")} outlined disabled={pending}
+      onPress={()=>{setSecret("");setCode("");setError("");setStep("email");}}/>}
+    <Button label={t("Späť do účtu")} outlined disabled={pending} onPress={leave}/>
+  </ScrollView>;
+}
+
 function SignIn({onLogin}: {onLogin:(account:Account)=>Promise<void>}) {
   const [email,setEmail] = useState(""), [secret,setSecret] = useState(""), [error,setError] = useState(""), [pending,setPending] = useState(false);
+  const [showSso,setShowSso] = useState(false), [tenant,setTenant] = useState("");
+  async function signInSso() {
+    setPending(true); setError("");
+    try {
+      const begin = await request<{url:string;poll:string}>("auth/entra/start","",{tenant:tenant.trim(),client:"native"});
+      await Linking.openURL(begin.url);
+      const deadline = Date.now()+285000;
+      for (;;) {
+        if (Date.now()>deadline) throw new Error(t("Prihlásenie Microsoft Entra sa nepodarilo dokončiť."));
+        const result = await request<Account & {pending?:boolean}>("auth/entra/complete","",{poll:begin.poll});
+        if (!result.pending) { await onLogin(result); return; }
+        await new Promise(resolve=>setTimeout(resolve,2500));
+      }
+    } catch (error) { setError(describe(error)); } finally { setPending(false); }
+  }
   async function signIn() {
     setPending(true); setError("");
     try {
@@ -91,12 +160,18 @@ function SignIn({onLogin}: {onLogin:(account:Account)=>Promise<void>}) {
   return <KeyboardAvoidingView style={styles.flex} behavior={Platform.OS==="ios" ? "padding" : undefined}>
     <ScrollView contentContainerStyle={styles.login} keyboardShouldPersistTaps="handled">
       <Image source={require("./assets/icon.png")} style={styles.logo} accessibilityIgnoresInvertColors/>
-      <Heading title="Corpo Workplace" description="Prihláste sa do svojho firemného pracoviska."/>
-      <Field label="E-mail" value={email} set={setEmail} email />
-      <Field label="Heslo" value={secret} set={setSecret} secret />
+      <Heading title="Corpo Workplace" description={t("Prihláste sa do svojho firemného pracoviska.")}/>
+      {!showSso && <><Field label={t("E-mail")} value={email} set={setEmail} email />
+      <Field label={t("Heslo")} value={secret} set={setSecret} secret />
+      <Button label={pending ? t("Prihlasovanie…") : t("Prihlásiť sa")} disabled={pending || !email || !secret} onPress={signIn}/></>}
+      {showSso && <>
+        <Field label={t("Identifikátor firmy pre prihlásenie SSO")} value={tenant} set={setTenant}/>
+        <Button label={pending ? t("Prihlasovanie…") : t("Pokračovať do Microsoft Entra")} disabled={pending || tenant.trim().length!==22} onPress={signInSso}/>
+      </>}
       {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
-      <Button label={pending ? "Prihlasovanie…" : "Prihlásiť sa"} disabled={pending || !email || !secret} onPress={signIn}/>
-      <Button label="Vytvoriť účet alebo obnoviť heslo" outlined onPress={()=>openWeb()}/>
+      <Button label={showSso ? t("Späť na prihlásenie") : t("Prihlásiť sa cez Microsoft Entra")} outlined disabled={pending}
+        onPress={()=>{setShowSso(!showSso);setError("");}}/>
+      <Button label={t("Vytvoriť účet alebo obnoviť heslo")} outlined onPress={()=>openWeb()}/>
     </ScrollView>
   </KeyboardAvoidingView>;
 }
@@ -113,15 +188,15 @@ function Booking({item,date,close,submit}: {item:Resource;date:string;close:()=>
     <SafeAreaView style={styles.flex} edges={["top","bottom"]}>
       <KeyboardAvoidingView behavior={Platform.OS==="ios" ? "padding" : undefined}>
         <ScrollView contentContainerStyle={styles.login} keyboardShouldPersistTaps="handled">
-          <Heading title={item.name} description={dateLabel.format(new Date(date+"T12:00:00Z"))+" · "+kindNames[item.kind]}/>
+          <Heading title={item.name} description={formatDate(date)+" · "+kindNames()[item.kind]}/>
           <View style={styles.two}>
-            <View style={styles.flex}><Field label="Od (HH:MM)" value={start} set={setStart}/></View>
-            <View style={styles.flex}><Field label="Do (HH:MM)" value={end} set={setEnd}/></View>
+            <View style={styles.flex}><Field label={t("Od (HH:MM)")} value={start} set={setStart}/></View>
+            <View style={styles.flex}><Field label={t("Do (HH:MM)")} value={end} set={setEnd}/></View>
           </View>
-          <Field label="Názov rezervácie (voliteľné)" value={title} set={setTitle}/>
+          <Field label={t("Názov rezervácie (voliteľné)")} value={title} set={setTitle}/>
           {!!error && <Text accessibilityLiveRegion="polite" style={styles.error}>{error}</Text>}
-          <Button label={pending ? "Ukladá sa…" : "Potvrdiť rezerváciu"} onPress={save} disabled={pending}/>
-          <Button label="Späť" onPress={close} disabled={pending} outlined/>
+          <Button label={pending ? t("Ukladá sa…") : t("Potvrdiť rezerváciu")} onPress={save} disabled={pending}/>
+          <Button label={t("Späť")} onPress={close} disabled={pending} outlined/>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -135,7 +210,7 @@ function FloorPlan({plan,work,token,open}: {plan:Plan;work:Work;token:string;ope
       source={{uri:origin+"api/tenant/"+work.tenant.id+"/plan/"+plan.id,headers:{Authorization:"Bearer "+token},cache:"reload"}}
       onLoad={event=>{ const {width,height}=event.nativeEvent.source; if(width && height) setRatio(width/height); }}/>
     {pins.map(r=><Pressable key={r.id} accessibilityRole="button" accessibilityLabel={r.name} onPress={()=>open(r)}
-      style={[styles.pin,{left:(r.x+"%") as `${number}%`,top:(r.y+"%") as `${number}%`}]}><Text style={styles.pinText}>{r.kind==="parking" ? "P" : r.kind==="room" ? "Z" : "S"}</Text></Pressable>)}
+      style={[styles.pin,{left:(r.x+"%") as `${number}%`,top:(r.y+"%") as `${number}%`}]}><Text style={styles.pinText}>{r.kind==="parking" ? "P" : r.kind==="room" ? (language()==="en" ? "R" : "Z") : (language()==="en" ? "D" : "S")}</Text></Pressable>)}
   </View>;
 }
 
@@ -143,7 +218,7 @@ function Workspace() {
   const [account,setAccount] = useState<Account|null>(null), [token,setToken] = useState(""), [tenant,setTenant] = useState(""), [work,setWork] = useState<Work|null>(null);
   const [tab,setTab] = useState<Tab>("book"), [kind,setKind] = useState<Kind|"">(""), [office,setOffice] = useState(""), [plan,setPlan] = useState("");
   const [date,setDate] = useState(""), [book,setBook] = useState<Resource|null>(null), [busy,setBusy] = useState(false), [boot,setBoot] = useState(true);
-  const [error,setError] = useState("");
+  const [error,setError] = useState(""), [mfa,setMfa] = useState(false);
   const [showAdmin,setShowAdmin] = useState(false);
   const sequence = useRef(0);
   const adminTicket = useCallback(async () => {
@@ -154,7 +229,7 @@ function Workspace() {
     setAccount(identity); setToken(credential); setTenant(identity.tenants[0]?.id || "");
   }
   async function onLogin(identity:Account) {
-    if (!identity.token) throw new Error("Nepodarilo sa vytvoriť mobilné prihlásenie.");
+    if (!identity.token) throw new Error(t("Nepodarilo sa vytvoriť mobilné prihlásenie."));
     await SecureStore.setItemAsync(key,identity.token);
     storeIdentity(identity,identity.token);
   }
@@ -162,7 +237,7 @@ function Workspace() {
     ++sequence.current;
     if (revoke) await request("auth/logout",token,{}).catch(()=>null);
     await SecureStore.deleteItemAsync(key);
-    setAccount(null); setToken(""); setWork(null); setTenant(""); setDate(""); setOffice(""); setPlan(""); setKind(""); setTab("book"); setBook(null); setShowAdmin(false); setBusy(false); setError("");
+    setAccount(null); setToken(""); setWork(null); setTenant(""); setDate(""); setOffice(""); setPlan(""); setKind(""); setTab("book"); setBook(null); setShowAdmin(false); setBusy(false); setError(""); setMfa(false);
   }
   useEffect(()=>{
     async function restore() {
@@ -171,7 +246,7 @@ function Workspace() {
         if (stored) storeIdentity(await request<Account>("account",stored),stored);
       } catch(error) {
         if (error instanceof RequestError && error.status===401) await SecureStore.deleteItemAsync(key);
-        else Alert.alert("Pracovisko sa nepodarilo načítať",describe(error));
+        else Alert.alert(t("Pracovisko sa nepodarilo načítať"),describe(error));
       } finally {setBoot(false);}
     }
     void restore();
@@ -182,77 +257,83 @@ function Workspace() {
     setBusy(true); setError("");
     try {
       const value = await request<Work>("tenant/"+id+(selected ? "?date="+encodeURIComponent(selected) : ""),credential);
-      if (current===sequence.current) { setWork(value); setDate(value.date); }
+      if (current===sequence.current) { setMfa(false); setWork(value); setDate(value.date); }
     } catch(error) {
       if(current===sequence.current) {
         if(error instanceof RequestError && error.status===401) await signOut(false);
-        else setError(describe(error));
+        else if (error instanceof RequestError && error.status===428) {
+          setWork(null); setShowAdmin(false); setBook(null); setMfa(true); setTab("book");
+        } else setError(describe(error));
       }
     } finally { if(current===sequence.current) setBusy(false); }
   }
   useEffect(()=>{ if(tenant && token) void refresh(tenant,"",token); },[tenant,token]);
   function switchTenant(id:string) {
     if(id===tenant) return;
-    setTenant(id); setWork(null); setDate(""); setOffice(""); setPlan(""); setKind(""); setBook(null);
+    setMfa(false); setTenant(id); setWork(null); setDate(""); setOffice(""); setPlan(""); setKind(""); setBook(null);
   }
-  const officeName = (id:string) => work?.offices.find(o=>o.id===id)?.name || "Kancelária";
+  const officeName = (id:string) => work?.offices.find(o=>o.id===id)?.name || t("Kancelária");
   async function change(action:string,record:object) {
     await request("tenant/"+tenant,token,{action,record});
     await refresh(tenant,date);
   }
   function cancel(id:string) {
-    Alert.alert("Zrušiť rezerváciu?","Čas bude opäť voľný.",
-      [{text:"Späť",style:"cancel"},{text:"Zrušiť rezerváciu",style:"destructive",onPress:()=>change("reservation.cancel",{id}).catch(error=>Alert.alert("Rezerváciu sa nepodarilo zrušiť",describe(error)))}]);
+    Alert.alert(t("Zrušiť rezerváciu?"),t("Čas bude opäť voľný."),
+      [{text:t("Späť"),style:"cancel"},{text:t("Zrušiť rezerváciu"),style:"destructive",onPress:()=>change("reservation.cancel",{id}).catch(error=>Alert.alert(t("Rezerváciu sa nepodarilo zrušiť"),describe(error)))}]);
   }
-  if (boot) return <View style={styles.center}><ActivityIndicator color="#235743"/><Text style={styles.muted}>Načítavam účet…</Text></View>;
+  if (boot) return <View style={styles.center}><ActivityIndicator color="#235743"/><Text style={styles.muted}>{t("Načítavam účet…")}</Text></View>;
   if (!account) return <SignIn onLogin={onLogin}/>;
   const active = account.tenants.find(item=>item.id===tenant);
   const role = work?.tenant.role ?? active?.role;
-  const isAdmin = role==="owner" || role==="admin";
-  const mobileTabs: [Tab|"admin",string][] = isAdmin ? [...tabs.slice(0,-1),["admin","Správa"],tabs[tabs.length-1]] : tabs;
+  const isAdmin = !mfa && (role==="owner" || role==="admin");
+  const tabs = translatedTabs();
+  const mobileTabs: [Tab|"admin",string][] = isAdmin ? [...tabs.slice(0,-1),["admin",t("Správa")],tabs[tabs.length-1]] : tabs;
   const closeAdmin = () => { setShowAdmin(false); void refresh(tenant,date); };
   const choices = account.tenants.map(t=>[t.id,t.name] as [string,string]);
-  const places: [string,string][] = [["","Všetky kancelárie"],...(work?.offices.filter(o=>!o.archived).map(o=>[o.id,o.name] as [string,string]) || [])];
+  const places: [string,string][] = [["",t("Všetky kancelárie")],...(work?.offices.filter(o=>!o.archived).map(o=>[o.id,o.name] as [string,string]) || [])];
   const plans = work?.plans.filter(p=>(!office || p.office===office) && !work.offices.find(o=>o.id===p.office)?.archived) || [];
   const selected = plans.find(p=>p.id===plan) || plans[0];
   const items = work?.resources.filter(r=>!r.disabled && (!kind || r.kind===kind) && (!office || r.office===office)) || [];
-  const datePicker = work && <View style={styles.dayBar}><Button label="Skôr" outlined disabled={busy || date<=work.today} onPress={()=>refresh(tenant,shiftDay(date,-1))}/>
-    <Text style={styles.label}>{dateLabel.format(new Date(date+"T12:00:00Z"))}</Text><Button label="Neskôr" outlined disabled={busy} onPress={()=>refresh(tenant,shiftDay(date,1))}/></View>;
+  const datePicker = work && <View style={styles.dayBar}><Button label={t("Skôr")} outlined disabled={busy || date<=work.today} onPress={()=>refresh(tenant,shiftDay(date,-1))}/>
+    <Text style={styles.label}>{formatDate(date)}</Text><Button label={t("Neskôr")} outlined disabled={busy} onPress={()=>refresh(tenant,shiftDay(date,1))}/></View>;
   return <View style={styles.flex}>
     <View style={styles.top}><Image source={require("./assets/icon.png")} style={styles.miniLogo}/><Text style={styles.topTitle}>{work?.tenant.name || "Corpo Workplace"}</Text></View>
-    {busy && <ActivityIndicator color="#235743" accessibilityLabel="Načítavam"/>}
-    {!!error && <View style={styles.failure}><Text style={styles.error}>{error}</Text><Button label="Skúsiť znova" outlined onPress={()=>refresh(tenant,date)}/></View>}
-    {tab==="book" && <FlatList data={items} keyExtractor={r=>r.id} contentContainerStyle={styles.content}
-      ListHeaderComponent={<><Heading title="Rezervovať" description="Stoly, zasadačky a parkovacie miesta."/>
+    {busy && <ActivityIndicator color="#235743" accessibilityLabel={t("Načítavam")}/>}
+    {!!error && <View style={styles.failure}><Text style={styles.error}>{error}</Text><Button label={t("Skúsiť znova")} outlined onPress={()=>refresh(tenant,date)}/></View>}
+    {mfa && tab!=="account" && <MfaPrompt key={tenant} id={tenant} credential={token}
+      verified={()=>{setMfa(false);void refresh(tenant,date);}} leave={()=>setTab("account")}/>}
+    {!mfa && tab==="book" && <FlatList data={items} keyExtractor={r=>r.id} contentContainerStyle={styles.content}
+      ListHeaderComponent={<><Heading title={t("Rezervovať")} description={t("Stoly, zasadačky a parkovacie miesta.")}/>
         {datePicker}<Segments items={places} value={office} select={setOffice}/>
-        <Segments<Kind|""> items={[["","Všetky"],["desk",labels.desk],["room",labels.room],["parking",labels.parking]]} value={kind} select={setKind}/></>}
-      ListEmptyComponent={<Text style={styles.muted}>{busy ? "Načítavam priestory…" : "Vo výbere zatiaľ nie sú žiadne priestory."}</Text>}
+        <Segments<Kind|""> items={[["",t("Všetky")],["desk",labels().desk],["room",labels().room],["parking",labels().parking]]} value={kind} select={setKind}/></>}
+      ListEmptyComponent={<Text style={styles.muted}>{busy ? t("Načítavam priestory…") : t("Vo výbere zatiaľ nie sú žiadne priestory.")}</Text>}
       renderItem={({item})=>{
         const reserved=work?.busy.filter(b=>b.resource===item.id).map(b=>b.start+"–"+b.end).join(", ");
-        return <Card name={item.name} description={[officeName(item.office),kindNames[item.kind],item.kind==="room" ? item.capacity+" osôb" : "",item.description,reserved ? "Rezervované: "+reserved : ""].filter(Boolean).join(" · ")}
-          action={<Button label="Rezervovať" onPress={()=>setBook(item)}/>}/>;
+        return <Card name={item.name} description={[officeName(item.office),kindNames()[item.kind],item.kind==="room" ? item.capacity+t(" osôb") : "",item.description,reserved ? t("Rezervované: ")+reserved : ""].filter(Boolean).join(" · ")}
+          action={<Button label={t("Rezervovať")} onPress={()=>setBook(item)}/>}/>;
       }}/>}
-    {tab==="mine" && <FlatList data={work?.mine || []} keyExtractor={r=>r.id} contentContainerStyle={styles.content}
-      ListHeaderComponent={<Heading title="Moje rezervácie" description="Nadchádzajúce rezervácie pracoviska."/>}
-      ListEmptyComponent={<Text style={styles.muted}>Zatiaľ nemáte rezervácie.</Text>}
+    {!mfa && tab==="mine" && <FlatList data={work?.mine || []} keyExtractor={r=>r.id} contentContainerStyle={styles.content}
+      ListHeaderComponent={<Heading title={t("Moje rezervácie")} description={t("Nadchádzajúce rezervácie pracoviska.")}/>}
+      ListEmptyComponent={<Text style={styles.muted}>{t("Zatiaľ nemáte rezervácie.")}</Text>}
       renderItem={({item})=><Card name={item.title || item.resourceName}
-        description={[item.resourceName,officeName(item.office),dateLabel.format(new Date(item.date+"T12:00:00Z")),item.start+"–"+item.end].join(" · ")}
-        action={<Button label="Zrušiť rezerváciu" outlined onPress={()=>cancel(item.id)}/>}/>}/>}
-    {tab==="plans" && <ScrollView contentContainerStyle={styles.content}>
-      <Heading title="Pôdorysy" description="Označené miesto môžete priamo rezervovať."/>
+        description={[item.resourceName,officeName(item.office),formatDate(item.date),item.start+"–"+item.end].join(" · ")}
+        action={<Button label={t("Zrušiť rezerváciu")} outlined onPress={()=>cancel(item.id)}/>}/>}/>}
+    {!mfa && tab==="plans" && <ScrollView contentContainerStyle={styles.content}>
+      <Heading title={t("Pôdorysy")} description={t("Označené miesto môžete priamo rezervovať.")}/>
       {datePicker}<Segments items={places} value={office} select={setOffice}/>
       {selected && work ? <><Segments items={plans.map(p=>[p.id,p.name])} value={selected.id} select={setPlan}/>
         <FloorPlan key={selected.id} plan={selected} work={work} token={token} open={setBook}/></> :
-        <Text style={styles.muted}>Žiadne pôdorysy pre vybrané pracovisko.</Text>}
+        <Text style={styles.muted}>{t("Žiadne pôdorysy pre vybrané pracovisko.")}</Text>}
     </ScrollView>}
     {tab==="account" && <ScrollView contentContainerStyle={styles.content}>
-      <Heading title="Účet" description="Profil a výber firemného pracoviska."/>
+      <Heading title={t("Účet")} description={t("Profil a výber firemného pracoviska.")}/>
       <Card name={account.user.name} description={account.user.email}/>
       {!!choices.length && <Segments items={choices} value={tenant} select={switchTenant}/>}
-      {work && <Text style={styles.muted}>{roleNames[work.tenant.role]}</Text>}
-      {isAdmin && <Button label="Správa firmy" outlined onPress={()=>setShowAdmin(true)}/>}
-      {!choices.length && <Button label="Vytvoriť pracovisko" outlined onPress={()=>openWeb()}/>}
-      <Button label="Odhlásiť sa" outlined onPress={()=>signOut().catch(error=>Alert.alert("Odhlásenie zlyhalo",describe(error)))}/>
+      {work && <Text style={styles.muted}>{roleNames()[work.tenant.role]}</Text>}
+      {work?.security?.sso && <Button label={t("Zabezpečenie účtu")} outlined onPress={()=>openWeb("#security")}/>}
+      {isAdmin && <Button label={t("Správa firmy")} outlined onPress={()=>setShowAdmin(true)}/>}
+      {!choices.length && <Button label={t("Vytvoriť pracovisko")} outlined onPress={()=>openWeb()}/>}
+      <Button label={t("Odhlásiť sa")} outlined onPress={()=>signOut().catch(error=>Alert.alert(t("Odhlásenie zlyhalo"),describe(error)))}/>
     </ScrollView>}
     <View style={styles.tabBar}>{mobileTabs.map(([id,label])=>{
       const selected = id==="admin" ? showAdmin : !showAdmin && tab===id;
@@ -265,10 +346,29 @@ function Workspace() {
   </View>;
 }
 export default function App() {
-  return <SafeAreaProvider><StatusBar style="dark"/><SafeAreaView style={styles.application}><Workspace/></SafeAreaView></SafeAreaProvider>;
+  const [locale,setLocale] = useState<Language|null>(null);
+  useEffect(()=>{
+    SecureStore.getItemAsync("corpo.language").then(saved=>{
+      const value=saved==="en" ? "en" : "sk";
+      setLanguage(value); setLocale(value);
+    }).catch(()=>setLocale("sk"));
+  },[]);
+  const selectLocale = (value:Language) => {
+    setLanguage(value); setLocale(value);
+    void SecureStore.setItemAsync("corpo.language",value).catch(()=>{});
+  };
+  return <SafeAreaProvider><StatusBar style="dark"/><SafeAreaView style={styles.application}>
+    {locale && <>
+      <View style={styles.languageMenu} accessibilityLabel={t("Jazyk")}>
+        <Segments<Language> items={[["sk","SK"],["en","EN"]]} value={locale} select={selectLocale}/>
+      </View>
+      <Workspace/>
+    </>}
+  </SafeAreaView></SafeAreaProvider>;
 }
 const styles = StyleSheet.create({
   application:{flex:1,backgroundColor:"#f4f6f1"},
+  languageMenu:{alignItems:"flex-end",paddingHorizontal:14,paddingTop:3},
   flex:{flex:1},
   center:{flex:1,justifyContent:"center",alignItems:"center",gap:12},
   content:{padding:16,paddingBottom:24},

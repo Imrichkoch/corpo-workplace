@@ -75,3 +75,45 @@ CREATE INDEX IF NOT EXISTS links_expiry ON links(expires);
 CREATE TABLE IF NOT EXISTS limits (
  key TEXT NOT NULL, bucket INTEGER NOT NULL, count INTEGER NOT NULL, PRIMARY KEY(key,bucket)
 );
+
+CREATE TABLE IF NOT EXISTS security_settings (
+  tenant TEXT PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+  sso INTEGER NOT NULL, mfa INTEGER NOT NULL, directory INTEGER NOT NULL,
+  entra_tenant TEXT NOT NULL, client_id TEXT NOT NULL, secret TEXT NOT NULL, revision INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS security_audit (
+  tenant TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  user TEXT NOT NULL REFERENCES users(id), changed INTEGER NOT NULL, policy TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS entra_identity (
+  tenant TEXT NOT NULL, user TEXT NOT NULL, directory TEXT NOT NULL, object_id TEXT NOT NULL,
+  PRIMARY KEY(tenant,user), UNIQUE(tenant,directory,object_id),
+  FOREIGN KEY(tenant,user) REFERENCES members(tenant,user) ON DELETE CASCADE
+);
+CREATE TABLE IF NOT EXISTS entra_flow (
+  hash TEXT PRIMARY KEY, tenant TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session TEXT REFERENCES sessions(hash) ON DELETE CASCADE, payload TEXT NOT NULL,
+  revision INTEGER NOT NULL, expires INTEGER NOT NULL, native_poll TEXT UNIQUE, verified_user TEXT REFERENCES users(id)
+);
+CREATE INDEX IF NOT EXISTS entra_flow_expiry ON entra_flow(expires);
+CREATE TABLE IF NOT EXISTS mfa_setup (
+  session TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE,
+  email_proof TEXT, secret TEXT, expires INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mfa_credentials (
+  user TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  secret TEXT NOT NULL, last_step INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS mfa_recovery (
+  user TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, code TEXT NOT NULL, PRIMARY KEY(user,code)
+);
+CREATE TABLE IF NOT EXISTS mfa_verified (
+  tenant TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+  session TEXT NOT NULL REFERENCES sessions(hash) ON DELETE CASCADE, expires INTEGER NOT NULL,
+  PRIMARY KEY(tenant,session)
+);
+
+CREATE TABLE IF NOT EXISTS session_tenant (
+  session TEXT PRIMARY KEY REFERENCES sessions(hash) ON DELETE CASCADE,
+  tenant TEXT NOT NULL REFERENCES tenants(id) ON DELETE CASCADE
+);

@@ -1,3 +1,4 @@
+import { language, t } from "./i18n";
 import React, { useEffect, useState } from "react";
 import { ActivityIndicator, Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
@@ -26,33 +27,33 @@ export default function AdminPanel({base, company, ticket, close}:Props) {
     let active = true;
     void ticket().then(raw => {
       if (!active) return;
-      setSource({uri:entry,method:"POST",body:"ticket="+encodeURIComponent(raw),
+      setSource({uri:entry,method:"POST",body:"ticket="+encodeURIComponent(raw)+"&lang="+language(),
         headers:{"Content-Type":"application/x-www-form-urlencoded"}});
     }).catch(reason => {
-      if (active) setError(reason instanceof Error ? reason.message : "Správu sa nepodarilo otvoriť.");
+      if (active) setError(reason instanceof Error ? reason.message : t("Správu sa nepodarilo otvoriť."));
     });
     return () => { active = false; };
   }, [ticket, entry, attempt]);
 
   function retry() { setError(""); setSource(null); setAttempt(value => value + 1); }
-  function connectionError() { setError("Správu sa nepodarilo načítať. Skúste ju otvoriť znova."); }
-  const spinner = () => <View style={styles.center}><ActivityIndicator color="#245743" accessibilityLabel="Načítavam správu"/></View>;
+  function connectionError() { setError(t("Správu sa nepodarilo načítať. Skúste ju otvoriť znova.")); }
+  const spinner = () => <View style={styles.center}><ActivityIndicator color="#245743" accessibilityLabel={t("Načítavam správu")}/></View>;
 
   return <Modal animationType="slide" presentationStyle="fullScreen" onRequestClose={close}>
     <SafeAreaView style={styles.screen}>
       <View style={styles.header}>
         <View style={styles.titleBlock}>
-          <Text style={styles.title} accessibilityRole="header">Správa firmy</Text>
+          <Text style={styles.title} accessibilityRole="header">{t("Správa firmy")}</Text>
           <Text style={styles.company} numberOfLines={1}>{company}</Text>
         </View>
-        <Pressable accessibilityRole="button" accessibilityLabel="Zavrieť správu" onPress={close} style={styles.smallButton}>
-          <Text style={styles.buttonText}>Zavrieť</Text>
+        <Pressable accessibilityRole="button" accessibilityLabel={t("Zavrieť správu")} onPress={close} style={styles.smallButton}>
+          <Text style={styles.buttonText}>{t("Zavrieť")}</Text>
         </Pressable>
       </View>
       {error ? <View style={styles.center}>
         <Text style={styles.message} accessibilityLiveRegion="polite">{error}</Text>
         <Pressable accessibilityRole="button" onPress={retry} style={styles.smallButton}>
-          <Text style={styles.buttonText}>Skúsiť znova</Text>
+          <Text style={styles.buttonText}>{t("Skúsiť znova")}</Text>
         </Pressable>
       </View> : source ? <WebView
         style={styles.browser}
@@ -71,7 +72,7 @@ export default function AdminPanel({base, company, ticket, close}:Props) {
         }}
         onMessage={({nativeEvent}) => {
           if (nativeEvent.url.startsWith(base) && nativeEvent.data === "corpo-admin-expired") {
-            setError("Relácia správy vypršala. Otvorte ju znova z aplikácie.");
+            setError(t("Relácia správy vypršala. Otvorte ju znova z aplikácie."));
           }
         }}
       /> : spinner()}

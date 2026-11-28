@@ -4,17 +4,18 @@ import mimetypes
 import os
 import re
 from contextlib import closing
+from html import escape
 from http import HTTPStatus
 from pathlib import Path
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, urlencode, urlsplit
 
-from . import auth, mail, mobile_admin, workplace
-from .core import IDENTIFIER, ROOT, Problem, connect, day, fail, first, initialise, object_body, rate, text, today, transaction
+from . import auth, i18n, mail, mobile_admin, security, sso, workplace
+from .core import IDENTIFIER, ROOT, Problem, connect, day, fail, first, initialise, object_body, rate, ref, text, today, transaction
 
 STATIC = ROOT / "web"
 STATIC_FILES = {
     "": "index.html", "app.js": "app.js", "ui.js": "ui.js", "admin.js": "admin.js",
-    "styles.css": "styles.css", "manifest.webmanifest": "manifest.webmanifest", "sw.js": "sw.js",
+    "security.js": "security.js", "i18n.js": "i18n.js", "en.json": "en.json", "styles.css": "styles.css", "manifest.webmanifest": "manifest.webmanifest", "sw.js": "sw.js",
     "icon-192.png": "icon-192.png", "icon-512.png": "icon-512.png", "favicon.svg": "favicon.svg",
 }
 LOG = logging.getLogger("corpo")
@@ -30,6 +31,8 @@ def headers(content_type, cache="private, no-store"):
 
 
 def reply(status, payload, extra=()):
+    if isinstance(payload.get("message"), str):
+        payload = {**payload, "message": i18n.t(payload["message"])}
     return status, json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode(), [*headers("application/json; charset=utf-8"), *extra]
 
 
@@ -55,6 +58,8 @@ def api(db, endpoint, method, environ, config):
         "auth/link": lambda: (auth.link_info(db, data, ip), []),
         "auth/accept": lambda: auth.accept_link(db, data, config, ip),
         "auth/login": lambda: auth.login(db, data, config, ip),
+        "auth/entra/start": lambda: sso.start(db, data, config, ip),
+        "auth/entra/complete": lambda: sso.native_complete(db, data, config),
     }
     if method == "POST" and endpoint in auth_api:
         result, additional = auth_api[endpoint]()
@@ -62,9 +67,15 @@ def api(db, endpoint, method, environ, config):
     user = identify(db, environ)
     uid = user["id"]
     admin_tenant = user.get("admin_tenant")
+    scope = admin_tenant or user.get("sso_tenant")
     if method == "POST" and endpoint == "auth/mobile-admin":
         if admin_tenant or not environ.get("HTTP_AUTHORIZATION", "").startswith("Bearer "):
             fail("Otvorte správu z mobilnej aplikácie.", 401)
+        tid = ref(data, "tenant")
+        if scope and tid != scope:
+            fail("Pracovisko sa nenašlo.", 404)
+        workplace.membership(db, tid, uid)
+        security.require_mfa(db, tid, user)
         return reply(200, mobile_admin.issue_ticket(db, user, data))
     if method == "POST" and endpoint == "auth/logout":
         table = "mobile_admin_access" if admin_tenant else "sessions"
@@ -73,7 +84,7 @@ def api(db, endpoint, method, environ, config):
     if method == "GET" and endpoint == "account":
         return reply(200, auth.account(db, user))
     if method == "POST" and endpoint == "account/tenants":
-        if admin_tenant:
+        if scope:
             fail("Toto prihlásenie je určené pre vybranú firmu.", 403)
         rate(db, f"tenant:create:{uid}", 8, 3600)
         with transaction(db):
@@ -82,13 +93,25 @@ def api(db, endpoint, method, environ, config):
     parts = endpoint.split("/")
     if len(parts) >= 2 and parts[0] == "tenant" and IDENTIFIER.fullmatch(parts[1]):
         tid = parts[1]
-        if admin_tenant and tid != admin_tenant:
+        if scope and tid != scope:
             fail("Pracovisko sa nenašlo.", 404)
+        tenant = workplace.membership(db, tid, uid)
+        if len(parts) in (3, 4) and parts[2] == "mfa":
+            return reply(200, security.mfa(db, tenant, user, method, parts[3] if len(parts) == 4 else "", data, config))
+        security.require_mfa(db, tid, user)
+        if endpoint.endswith("/security") and len(parts) == 3 and method == "POST":
+            return reply(200, security.update(db, tenant, user, data))
+        if endpoint.endswith("/entra") and len(parts) == 3 and method == "POST":
+            if admin_tenant:
+                fail("Prepojenie účtu otvorte v bežnom prehliadači.", 403)
+            result, additional = sso.start(db, data, config, ip, user, tenant)
+            return reply(200, result, additional)
         if len(parts) == 2 and method == "GET":
-            tenant = workplace.membership(db, tid, uid)
             query = parse_qs(environ.get("QUERY_STRING", ""), max_num_fields=12)
             value = query.get("date", [today()])[0]
-            return reply(200, workplace.snapshot(db, tenant, uid, day({"date": value})))
+            payload = workplace.snapshot(db, tenant, uid, day({"date": value}))
+            payload["security"] = security.public_settings(db, tenant, user)
+            return reply(200, payload)
         if len(parts) == 2 and method == "POST":
             action = text(data, "action", 40)
             payload = data.get("record")
@@ -96,7 +119,6 @@ def api(db, endpoint, method, environ, config):
                 fail("Chýbajú údaje požiadavky.")
             return reply(200, workplace.dispatch(db, tid, uid, action, payload, config))
         if len(parts) == 4 and parts[2] == "plan" and IDENTIFIER.fullmatch(parts[3]) and method == "GET":
-            tenant = workplace.membership(db, tid, uid)
             plan = first(db, """SELECT p.image,p.mime FROM plans p JOIN offices o ON o.tenant=p.tenant AND o.id=p.office
                                 WHERE p.tenant=? AND p.id=? AND (? OR o.archived=0)""",
                          tid, parts[3], tenant["role"] != "member")
@@ -116,11 +138,13 @@ def mobile_exchange(db, environ, config):
         size = int(environ.get("CONTENT_LENGTH") or 0)
         if not 0 < size <= 128:
             fail("Odkaz je neplatný.", 400)
-        values = parse_qs(environ["wsgi.input"].read(size).decode("ascii"), strict_parsing=True, max_num_fields=1)
+        values = parse_qs(environ["wsgi.input"].read(size).decode("ascii"), strict_parsing=True, max_num_fields=2)
     except (ValueError, UnicodeError):
         fail("Odkaz je neplatný.", 400)
     browser = mobile_admin.redeem(db, values.get("ticket",[None])[0])
-    location = PREFIX + "?mobileAdmin=1#admin"
+    locale = values.get("lang", [""])[0]
+    language = "&lang=" + locale if locale in ("sk", "en") else ""
+    location = PREFIX + "?mobileAdmin=1" + language + "#admin"
     return 303, b"", [
         *headers("text/plain; charset=utf-8"),
         ("Location", location),
@@ -128,11 +152,35 @@ def mobile_exchange(db, environ, config):
     ]
 
 
+def entra_callback(db, environ, config):
+    expired = sso.flow_cookie("", config["base"], 0)
+    try:
+        args = parse_qs(environ.get("QUERY_STRING", ""), max_num_fields=16)
+        status, tenant, additional = sso.callback(db, {k: v[0] for k, v in args.items()}, config, environ)
+    except (Problem, ValueError) as error:
+        message = error.message if isinstance(error, Problem) else sso.ERROR
+        return entra_message(message, expired)
+    if status == "native":
+        return entra_message("Prihlásenie bolo úspešné. Vráťte sa do aplikácie Corpo.", expired, native=True)
+    location = PREFIX + "?" + urlencode({"lang": i18n.current.get(), "tenant": tenant})
+    location += "#security" if status == "linked" else "#book"
+    return 303, b"", [*headers("text/plain; charset=utf-8"), ("Location", location), expired, *additional]
+
+
+def entra_message(message, expired, native=False):
+    title = escape(i18n.t(message))
+    text = escape(i18n.t("Otvoriť aplikáciu Corpo" if native else "Otvoriť Corpo Workplace"))
+    href = "corpo-workplace://signin" if native else PREFIX
+    body = f'<!doctype html><html lang="{i18n.current.get()}"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Corpo Workplace</title><link rel="stylesheet" href="{PREFIX}styles.css"><main class="auth-content"><h1>{title}</h1><a class="btn primary" href="{href}">{text}</a></main></html>'
+    return 200, body.encode(), [*headers("text/html; charset=utf-8"), expired]
+
+
 def create_app(config=None):
     config = config or mail.settings()
     initialise(config["db"])
 
     def app(environ, start_response):
+        language = i18n.current.set(i18n.request_language(environ))
         try:
             path = environ.get("PATH_INFO", "")
             method = environ.get("REQUEST_METHOD", "")
@@ -145,6 +193,9 @@ def create_app(config=None):
                 if target.startswith("api/") and method in ("GET", "POST"):
                     with closing(connect(config["db"])) as db:
                         status, body, response_headers = api(db, target[4:], method, environ, config)
+                elif target == sso.REDIRECT.lstrip("/") and method == "GET":
+                    with closing(connect(config["db"])) as db:
+                        status, body, response_headers = entra_callback(db, environ, config)
                 elif target == "mobile-admin/session" and method == "POST":
                     with closing(connect(config["db"])) as db:
                         status, body, response_headers = mobile_exchange(db, environ, config)
@@ -165,6 +216,8 @@ def create_app(config=None):
         except Exception:
             LOG.exception("Unhandled Corpo request")
             status, body, response_headers = reply(500, {"message": "Nastala chyba na serveri."})
+        finally:
+            i18n.current.reset(language)
         start_response(f"{status} {HTTPStatus(status).phrase}", [*response_headers, ("Content-Length", str(len(body)))])
         return [b"" if environ.get("REQUEST_METHOD") == "HEAD" else body]
 

@@ -1,7 +1,8 @@
-export const roles = { owner: "Vlastník", admin: "Správca", member: "Člen" };
-export const kinds = { desk: "Pracovný stôl", room: "Zasadačka", parking: "Parkovacie miesto" };
-export const typePlural = { desk: "Pracovné stoly", room: "Zasadačky", parking: "Parkovacie miesta" };
-export const visitStates = { expected: "Očakávaná", arrived: "V budove", departed: "Ukončená" };
+import { locale, t } from "./i18n.js";
+export const roles = { owner: t("Vlastník"), admin: t("Správca"), member: t("Člen") };
+export const kinds = { desk: t("Pracovný stôl"), room: t("Zasadačka"), parking: t("Parkovacie miesto") };
+export const typePlural = { desk: t("Pracovné stoly"), room: t("Zasadačky"), parking: t("Parkovacie miesta") };
+export const visitStates = { expected: t("Očakávaná"), arrived: t("V budove"), departed: t("Ukončená") };
 const sprites = {
   reserve: '<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 10h18m5 5h2m4 0h2"/>',
   people: '<circle cx="9" cy="7" r="4"/><path d="M2 21v-2a4 4 0 0 1 4-4h6a4 4 0 0 1 4 4v2m0-18a4 4 0 0 1 0 8m6 10v-2a4 4 0 0 0-3-4"/>',
@@ -36,16 +37,16 @@ export const chip = (label, kind = "") => '<span class="chip ' + kind + '">' + e
 export const empty = (symbol, title, copy, action = "") => '<div class="empty"><span class="tile">' + svg(symbol, 23) + '</span><h2>' + e(title) + '</h2><p>' + e(copy) + '</p>' + action + '</div>';
 export const panel = (title, copy, content, action = "") => '<section class="panel"><header class="panel-head"><div><h2>' + e(title) + '</h2>' + (copy ? '<p>' + e(copy) + '</p>' : '') + '</div>' + action + '</header>' + content + '</section>';
 export const row = (symbol, title, subtitle, actions = "", label = "") => '<li class="line"><span class="tile ' + e(symbol) + '">' + svg(symbol) + '</span><div class="row-copy"><strong>' + e(title) + '</strong><span>' + e(subtitle) + '</span></div>' + label + '<div class="line-actions">' + actions + '</div></li>';
-export const list = (contents, absent = "Žiadne záznamy.") => contents.length ? '<ul class="lines">' + contents.join("") + '</ul>' : '<p class="quiet empty-line">' + e(absent) + '</p>';
+export const list = (contents, absent = t("Žiadne záznamy.")) => contents.length ? '<ul class="lines">' + contents.join("") + '</ul>' : '<p class="quiet empty-line">' + e(absent) + '</p>';
 export const submit = (label) => '<p class="form-error" role="alert" hidden></p><button class="btn primary" type="submit">' + e(label) + '</button>';
-export const form = (id, contents, label, attrs = "") => '<form data-form="' + e(id) + '" ' + attrs + '>' + contents + '<footer class="form-actions">' + button("Späť", "close") + submit(label) + "</footer></form>";
-export const shortDate = (day) => new Intl.DateTimeFormat("sk-SK", {day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(day + "T12:00:00Z"));
+export const form = (id, contents, label, attrs = "") => '<form data-form="' + e(id) + '" ' + attrs + '>' + contents + '<footer class="form-actions">' + button(t("Späť"), "close") + submit(label) + "</footer></form>";
+export const shortDate = (day) => new Intl.DateTimeFormat(locale, {day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(day + "T12:00:00Z"));
 export const planUrl = (tenant, plan) => "./api/tenant/" + encodeURIComponent(tenant) + "/plan/" + encodeURIComponent(plan);
 export function planImage(tenant, plan, resources, label = "", edit = false, busy = []) {
   const pins = resources.filter(r => r.plan === plan && !r.disabled && Number.isFinite(r.x) && Number.isFinite(r.y));
   const reserved = new Set(busy.map(slot => slot.resource));
   const markers = pins.map(r => '<button class="pin ' + r.kind + (reserved.has(r.id) ? " pin-reserved" : "") + '" aria-label="' + e(r.name) +
-    '" title="' + e(r.name + " · " + (reserved.has(r.id) ? "Má rezervované časy" : "Rezervovať")) +
+    '" title="' + e(r.name + " · " + (reserved.has(r.id) ? t("Má rezervované časy") : t("Rezervovať"))) +
     '" type="button" style="--x:' + r.x + '%;--y:' + r.y + '%" data-action="book" ' + linkAttrs(r.id) + '>' + svg(r.kind, 15) + '</button>').join("");
-  return '<div class="pinboard" ' + (edit ? 'data-pin-edit' : '') + '><img src="' + planUrl(tenant, plan) + '" alt="' + e(label || "Pôdorys pracoviska") + '" draggable="false">' + markers + '</div>';
+  return '<div class="pinboard" ' + (edit ? 'data-pin-edit' : '') + '><img src="' + planUrl(tenant, plan) + '" alt="' + e(label || t("Pôdorys pracoviska")) + '" draggable="false">' + markers + '</div>';
 }

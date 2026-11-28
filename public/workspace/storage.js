@@ -1,3 +1,4 @@
+import { t } from "./i18n.js";
 import { dayKey, sampleData } from "./data.js";
 import { checkBooking, checkVisit, findConflict } from "./validation.js";
 
@@ -16,7 +17,7 @@ export function makeStorage(hosted) {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       } : { cache: "no-store" });
       const data = await response.json().catch(() => null);
-      if (!response.ok || !data) throw new Error(data?.message || "Pracovisko je momentálne nedostupné.");
+      if (!response.ok || !data) throw new Error(data?.message || t("Pracovisko je momentálne nedostupné."));
       return data;
     };
     return { load: () => send(), update: (action, record) => send({ action, record }) };
@@ -30,7 +31,7 @@ export function makeStorage(hosted) {
       case "create-booking": {
         const error = checkBooking(record);
         if (error) throw new Error(error);
-        if (findConflict(bookings, record)) throw new Error("Priestor je v tomto čase rezervovaný.");
+        if (findConflict(bookings, record)) throw new Error(t("Priestor je v tomto čase rezervovaný."));
         bookings.push({ ...record, id: globalThis.crypto?.randomUUID?.() ?? String(Date.now()), mine: true, person: data.profile.name });
         break;
       }
@@ -45,7 +46,7 @@ export function makeStorage(hosted) {
       }
       case "next-visit": {
         const visit = visits.find((v) => v.id === record.id);
-        if (!visit || visit.status !== record.status || visit.status === "departed") throw new Error("Stav návštevy sa medzitým zmenil.");
+        if (!visit || visit.status !== record.status || visit.status === "departed") throw new Error(t("Stav návštevy sa medzitým zmenil."));
         visit.status = visit.status === "expected" ? "arrived" : "departed";
         break;
       }
@@ -53,7 +54,7 @@ export function makeStorage(hosted) {
         data.visits = visits.filter((v) => v.id !== record.id);
         break;
       default:
-        throw new Error("Neznáma akcia.");
+        throw new Error(t("Neznáma akcia."));
     }
     memory = data;
     writeLocal(demoKey, data);

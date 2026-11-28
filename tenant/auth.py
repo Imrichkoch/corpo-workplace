@@ -32,7 +32,8 @@ def session(db, environ):
     if not SECRET.fullmatch(raw):
         return None
     fingerprint, timestamp = digest(raw), now()
-    user = first(db, """SELECT u.id,u.name,u.email,s.hash FROM users u JOIN sessions s ON s.user=u.id
+    user = first(db, """SELECT u.id,u.name,u.email,s.hash,x.tenant AS sso_tenant FROM users u JOIN sessions s ON s.user=u.id
+                        LEFT JOIN session_tenant x ON s.hash=x.session
                         WHERE s.hash=? AND s.expires>?""", fingerprint, timestamp)
     return user or (None if bearer else mobile_admin.browser_user(db, fingerprint, timestamp))
 
@@ -43,8 +44,9 @@ def profile(user):
 
 def account(db, user):
     tenants = list_tenants(db, user["id"])
-    if user.get("admin_tenant"):
-        tenants = [tenant for tenant in tenants if tenant["id"] == user["admin_tenant"]]
+    scope = user.get("admin_tenant") or user.get("sso_tenant")
+    if scope:
+        tenants = [tenant for tenant in tenants if tenant["id"] == scope]
     return {"user": profile(user), "tenants": tenants}
 
 
@@ -53,10 +55,12 @@ def cookie(raw, base, age=SESSION_AGE):
     return f"{COOKIE}={raw}; Path=/corpo/app/; HttpOnly; SameSite=Lax; Max-Age={age}{flags}"
 
 
-def issue(db, user, data, config):
+def issue(db, user, data, config, tenant=None):
     raw = token()
     db.execute("INSERT INTO sessions VALUES(?,?,?)", (digest(raw), user["id"], now() + SESSION_AGE))
-    payload = account(db, user)
+    if tenant:
+        db.execute("INSERT INTO session_tenant VALUES(?,?)", (digest(raw), tenant))
+    payload = account(db, {**user, "sso_tenant": tenant})
     if data.get("client") == "native":
         payload["token"] = raw
         return payload, []
