@@ -35,7 +35,10 @@ export function adminView(view, data, { office, kind }) {
     return header("Správa pôdorysov", "Nahrajte pôdorys kancelárie alebo parkoviska. Polohy miest nastavíte pri úprave priestoru.", data.offices.some(o => !o.archived) ? add("Nahrať pôdorys", "plan") : add("Pridať kanceláriu", "office")) +
       (data.plans.length ? '<div class="plan-grid">' + data.plans.map(p =>
         panel(p.name, resourceOffice(data,p.office) + " · " + (p.kind === "parking" ? "Parkovisko" : "Kancelária"),
-          planImage(data.tenant.id,p.id,data.resources,p.name), edit(p.id,"plan") + change(p.id,"plan.remove","Odstrániť"))).join("") + "</div>" :
+          planImage(data.tenant.id,p.id,data.resources,p.name),
+          '<div class="plan-admin-actions">' +
+          (data.offices.some(o => o.id === p.office && !o.archived) ? '<a class="btn secondary small" href="#map/' + e(p.id) + '">Rezervovať z mapy</a>' : "") +
+          edit(p.id,"plan") + change(p.id,"plan.remove","Odstrániť") + '</div>')).join("") + "</div>" :
         empty("map","Pridajte prvý pôdorys","Obrázok môže byť vo formáte PNG, JPEG alebo WebP do 3 MB."));
   }
   if (view === "team") {

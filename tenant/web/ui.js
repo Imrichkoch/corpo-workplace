@@ -41,8 +41,11 @@ export const submit = (label) => '<p class="form-error" role="alert" hidden></p>
 export const form = (id, contents, label, attrs = "") => '<form data-form="' + e(id) + '" ' + attrs + '>' + contents + '<footer class="form-actions">' + button("Späť", "close") + submit(label) + "</footer></form>";
 export const shortDate = (day) => new Intl.DateTimeFormat("sk-SK", {day:"numeric",month:"short",year:"numeric",timeZone:"UTC"}).format(new Date(day + "T12:00:00Z"));
 export const planUrl = (tenant, plan) => "./api/tenant/" + encodeURIComponent(tenant) + "/plan/" + encodeURIComponent(plan);
-export function planImage(tenant, plan, resources, label = "", edit = false) {
+export function planImage(tenant, plan, resources, label = "", edit = false, busy = []) {
   const pins = resources.filter(r => r.plan === plan && !r.disabled && Number.isFinite(r.x) && Number.isFinite(r.y));
-  const markers = pins.map(r => '<button class="pin ' + r.kind + '" aria-label="' + e(r.name) + '" type="button" style="--x:' + r.x + '%;--y:' + r.y + '%" data-action="book" ' + linkAttrs(r.id) + '>' + svg(r.kind, 15) + '</button>').join("");
+  const reserved = new Set(busy.map(slot => slot.resource));
+  const markers = pins.map(r => '<button class="pin ' + r.kind + (reserved.has(r.id) ? " pin-reserved" : "") + '" aria-label="' + e(r.name) +
+    '" title="' + e(r.name + " · " + (reserved.has(r.id) ? "Má rezervované časy" : "Rezervovať")) +
+    '" type="button" style="--x:' + r.x + '%;--y:' + r.y + '%" data-action="book" ' + linkAttrs(r.id) + '>' + svg(r.kind, 15) + '</button>').join("");
   return '<div class="pinboard" ' + (edit ? 'data-pin-edit' : '') + '><img src="' + planUrl(tenant, plan) + '" alt="' + e(label || "Pôdorys pracoviska") + '" draggable="false">' + markers + '</div>';
 }

@@ -13,8 +13,9 @@ const local = {
   get() { try { return localStorage.getItem("corpo.selectedTenant"); } catch { return ""; } },
   set(id) { try { localStorage.setItem("corpo.selectedTenant",id); } catch {} },
 };
+const [initialView, initialPlan = ""] = location.hash.slice(1).split("/");
 const state = {
-  account: null, data: null, tenant: "", office: "", kind: "", date: "", plan: "", view: location.hash.slice(1) || "book",
+  account: null, data: null, tenant: "", office: "", kind: "", date: "", plan: initialView === "map" ? initialPlan : "", view: initialView || "book",
   mode: "login", link: null, token: "", entry: "", mobile: false, saving: false, loading: true,
   loadError: "", request: 0,
 };
@@ -182,20 +183,45 @@ function bookView() {
       (r.description ? '<p>' + e(r.description) + '</p>' : '') +
       '<div class="resource-foot"><span>' + (reserved.length ? svg("clock",15) + e(reserved.join(", ")) : e(kinds[r.kind])) + '</span>' + bookButton(r.id) + '</div></article>';
   });
-  return header("Rezervovať priestor","Vyberte si stôl, zasadačku alebo parkovacie miesto.",isAdmin() && !data.offices.some(o => !o.archived) ? openButton("Pridať kanceláriu","office") : "") +
+  const action = data.plans.some(p => inOffice(p) && data.offices.some(o => o.id === p.office && !o.archived))
+    ? '<a class="btn primary" href="#map">' + svg("map",17) + 'Rezervovať z pôdorysu</a>'
+    : isAdmin() && !data.offices.some(o => !o.archived) ? openButton("Pridať kanceláriu","office") : "";
+  return header("Rezervovať priestor","Vyberte si stôl, zasadačku alebo parkovacie miesto.",action) +
     '<div class="shape-filters">' + filterBar(true,true) + '<div class="segments" aria-label="Typ priestoru">' + tabsHtml + '</div></div>' +
     (cards.length ? '<div class="resource-grid">' + cards.join("") + '</div>' :
       empty("office","Žiadne priestory","V tomto výbere zatiaľ nie sú žiadne rezervovateľné miesta.",
             isAdmin() && data.offices.some(o => !o.archived) ? openButton("Pridať priestor","resource") : ""));
 }
 function mapView() {
-  const data = state.data;
-  const plans = data.plans.filter(p => inOffice(p) && !data.offices.find(o => o.id === p.office)?.archived);
+  const {data} = state;
+  const plans = data.plans.filter(p => inOffice(p) && data.offices.some(o => o.id === p.office && !o.archived));
   const selected = plans.find(p => p.id === state.plan) || plans[0];
-  return header("Pôdorysy","Vyberte pracovisko a rezervujte si miesto priamo z mapy.") + filterBar() +
-    (selected ? panel(selected.name,officeName(selected.office),
-      select("Pôdorys","plan",options(plans,selected.id),'data-filter="plan"') + planImage(data.tenant.id,selected.id,data.resources,selected.name)) :
-      empty("map","Žiadny pôdorys","Správca môže nahrať obrázok kancelárie alebo parkoviska."));
+  const heading = header("Pôdorysy","Vyberte pôdorys a kliknite na miesto, ktoré chcete rezervovať.") + filterBar(true,true);
+  if (!selected) {
+    const manage = isAdmin() ? '<a class="btn secondary" href="#plans">Prejsť na správu pôdorysov</a>' : "";
+    const where = state.office ? officeName(state.office) : data.tenant.name;
+    return heading + empty("map","Žiadny pôdorys v tomto výbere",where + " zatiaľ nemá dostupný pôdorys.",manage);
+  }
+
+  const places = data.resources.filter(r => !r.disabled && r.plan === selected.id &&
+    Number.isFinite(r.x) && Number.isFinite(r.y));
+  const choices = plans.map(plan => {
+    const parking = plan.kind === "parking";
+    return '<a class="plan-choice" href="#map/' + e(plan.id) + '"' + (plan === selected ? ' aria-current="location"' : "") + '>' +
+      '<span class="tile ' + (parking ? "parking" : "desk") + '">' + svg(parking ? "parking" : "office",19) + '</span>' +
+      '<span><strong>' + e(plan.name) + '</strong><small>' + e(officeName(plan.office)) + '</small></span></a>';
+  });
+  const rows = places.map(place => {
+    const occupied = data.busy.filter(slot => slot.resource === place.id).map(interval);
+    const availability = occupied.length ? 'Rezervované ' + occupied.join(", ") : "Bez rezervácií v tento deň";
+    return row(place.kind,place.name,kinds[place.kind] + " · " + availability,bookButton(place.id));
+  });
+  return heading + '<nav class="plan-choices" aria-label="Výber pôdorysu">' + choices.join("") + '</nav>' +
+    panel(selected.name,officeName(selected.office) + " · " + labelToday(),
+      (places.length ? '<div class="map-key"><span>Značka otvorí rezerváciu</span><span>Má rezervované časy</span></div>' : "") +
+      planImage(data.tenant.id,selected.id,places,selected.name,false,data.busy)) +
+    panel("Miesta na pôdoryse","Rezerváciu môžete otvoriť aj zo zoznamu.",
+      list(rows,"Na tomto pôdoryse zatiaľ nemáte dostupné označené miesta."));
 }
 function visitsView() {
   const visits = state.data.visits.filter(inOffice);
@@ -233,14 +259,19 @@ function render() {
     '<main id="main" class="initial">Načítavam pracovisko…</main>' : guest();
 }
 function navigate() {
-  const target = location.hash.slice(1);
+  const [target, plan] = location.hash.slice(1).split("/");
   if (!target || target === "main" || target.startsWith("link=")) return;
   const found = tabs.find(([id]) => id === target);
   if (!found && target !== "mobile") return;
   if (target === "mobile" || available(target) || !state.data) state.view = target;
   else state.view = "book";
+  if (state.view === "map" && plan) {
+    state.plan = plan;
+    const office = state.data?.plans.find(item => item.id === plan)?.office;
+    if (office && state.office && state.office !== office) state.office = "";
+  }
   if (!["book","inventory"].includes(state.view)) state.kind = "";
-  if (state.view === "book" && state.data && state.date < state.data.today) { state.date = state.data.today; }
+  if (["book","map"].includes(state.view) && state.data && state.date < state.data.today) state.date = state.data.today;
   state.mobile = false;
   render();
   root.querySelector("#main")?.focus({preventScroll:true});
@@ -277,9 +308,28 @@ function book(id) {
   modal("Rezervovať " + item.name,form("reservation.create",
     '<p class="quiet">' + e([officeName(item.office),kinds[item.kind]].join(" · ")) + '</p><input type="hidden" name="resource" value="' + e(item.id) + '">' +
     input("Dátum","date",'type="date" required min="' + state.data.today + '" value="' + [state.date,state.data.today].sort().at(-1) + '"') +
+    '<p class="slot-status" data-slot-status aria-live="polite"></p>' +
     '<div class="fields">' + input("Od","start",'type="time" value="09:00" required') +
     input("Do","end",'type="time" value="' + cap + '" required') + '</div>' +
     input("Názov rezervácie (voliteľné)","title",'maxlength="100"'),"Potvrdiť rezerváciu"));
+  void loadBookingSlots(dialog.querySelector("form"));
+}
+async function loadBookingSlots(formElement) {
+  const date = formElement.elements.date;
+  const output = formElement.querySelector("[data-slot-status]");
+  const selected = date.value, tenant = state.tenant;
+  if (!selected || !date.validity.valid) { output.textContent = ""; return; }
+  const id = formElement.elements.resource.value;
+  const current = () => dialog.open && formElement.isConnected && state.tenant === tenant && date.value === selected;
+  output.textContent = "Overujem rezervované časy…";
+  try {
+    const data = state.data.date === selected ? state.data : await api(endpoint() + "?date=" + encodeURIComponent(selected));
+    if (!current()) return;
+    const slots = data.busy.filter(slot => slot.resource === id).map(interval);
+    output.textContent = slots.length ? "Rezervované časy: " + slots.join(", ") : "Na tento deň zatiaľ nie sú rezervované časy.";
+  } catch {
+    if (current()) output.textContent = "Rezervované časy sa nepodarilo načítať.";
+  }
 }
 function confirmChange(element) {
   const {id,command,archived,status} = element.dataset;
@@ -295,6 +345,7 @@ function confirmChange(element) {
 
 async function mutate(action, record) {
   const result = await api(endpoint(),{action,record});
+  if (action === "reservation.create") state.date = record.date;
   if (action === "tenant.rename") state.account = await api("account");
   await refresh({quiet:true});
   const invite = action === "invite.send";
@@ -388,9 +439,19 @@ document.addEventListener("click",event => {
 document.addEventListener("change",event => {
   const element = event.target, filter = element.dataset.filter;
   if (filter === "tenant" && state.account.tenants.some(t => t.id === element.value)) {
-    state.tenant = element.value; local.set(state.tenant); state.data = null; state.date = ""; state.office = ""; state.plan = ""; state.kind = ""; refresh();
-  } else if (filter === "date" && element.value) { state.date = element.value; refresh({quiet:true}); }
-  else if (filter && ["office","plan","kind"].includes(filter)) { state[filter] = element.value; render(); }
+    state.tenant = element.value; local.set(state.tenant); state.data = null; state.date = ""; state.office = ""; state.plan = ""; state.kind = "";
+    if (state.view === "map") history.replaceState(null,"","#map");
+    refresh();
+  } else if (filter === "date" && element.value && element.validity.valid) { state.date = element.value; refresh({quiet:true}); }
+  else if (filter === "office" || filter === "kind") {
+    state[filter] = element.value;
+    if (filter === "office" && state.view === "map") {
+      state.plan = "";
+      history.replaceState(null,"","#map");
+    }
+    render();
+  }
+  if (element.form?.dataset.form === "reservation.create" && element.name === "date") void loadBookingSlots(element.form);
   if (element.form?.dataset.form === "resource.save") {
     if (element.hasAttribute("data-resource-field") || element.hasAttribute("data-resource-plan")) {
       if (element.hasAttribute("data-resource-plan")) { element.form.elements.x.value = ""; element.form.elements.y.value = ""; }
