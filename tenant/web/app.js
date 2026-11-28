@@ -152,7 +152,8 @@ function chrome() {
     '<div class="outer"><div class="top"><div>' + button("Navigácia","menu","menu","icon mobile-only",'aria-controls="sidebar" aria-expanded="' + state.mobile + '"') +
     (mobileAdmin ? (state.view === "admin" ? "" : '<a class="text" href="#admin">Prehľad správy</a>') : '<strong>Firemné pracovisko</strong>') +
     '</div><div class="top-right">' +
-    (mobileAdmin ? "" : '<a class="text mobile-download" href="#mobile">' + svg("parking",16) + 'Mobilná aplikácia</a>' +
+    (mobileAdmin ? "" : (isAdmin() ? '<a class="btn secondary small top-admin-entry" href="#admin">Správa</a>' : "") +
+      '<a class="text mobile-download" href="#mobile">' + svg("parking",16) + 'Mobilná aplikácia</a>' +
       (state.account.tenants.length ? select("Firma","tenant",options(state.account.tenants,state.tenant),'data-filter="tenant"') : "")) +
     '</div></div><main id="main" tabindex="-1" class="workspace">' + workspace() + '</main></div></div>';
 }

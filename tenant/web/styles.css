@@ -112,3 +112,4 @@ fieldset{min-width:0;border:1px solid var(--border);border-radius:8px;padding:9p
 .admin-shortcut:hover{background:#f3f8ef;border-color:#c9ddc9}
 .admin-shortcut strong{display:block;font-size:16px;color:var(--ink)}
 .admin-shortcut small{display:block;color:var(--muted);line-height:1.4;font-size:13px;margin-top:4px}
+@media(max-width:650px){.top-right .top-admin-entry{min-height:40px}.top-right select{max-width:46vw}}
