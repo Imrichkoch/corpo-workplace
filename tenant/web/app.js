@@ -215,7 +215,7 @@ function mobileView() {
     panel("Pridanie na plochu","Aplikácia sa otvorí samostatne a používa rovnaký účet.",
       '<div class="mobile-help"><p><strong>Android</strong> V Chrome otvorte ponuku a vyberte možnosť Nainštalovať aplikáciu alebo Pridať na plochu.</p>' +
       '<p><strong>iPhone</strong> V Safari vyberte Zdieľať a Pridať na plochu.</p></div>' +
-      '<p><a class="btn secondary" href="corpo-workplace://signin">Otvoriť nainštalovanú aplikáciu</a></p>');
+      '<div class="launch-links"><a class="btn primary" href="../downloads/corpo-workplace-1.0.0-android.apk" download>Stiahnuť Android APK</a><a class="btn secondary" href="corpo-workplace://signin">Otvoriť nainštalovanú aplikáciu</a></div>');
 }
 function workspace() {
   if (state.loading && !state.data) return '<p class="initial">Načítavam pracovisko…</p>';
